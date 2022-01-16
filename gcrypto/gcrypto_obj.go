@@ -1,0 +1,65 @@
+package gcrypto
+
+import "bytes"
+
+//---------------------------------------------------------------------------------------
+type cryptoObj struct {
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetHMAC(hType int, key []byte) IGCryptoHMAC {
+	return createCryptoHMAC(hType, key)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetHash(hType int) IGCryptoHash {
+	return createCryptoHash(hType)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetCipher(sType int, key []byte) IGCryptoCipher {
+	return createCryptoCipher(sType, key)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetDH(group int) IGCryptoDH {
+	return createCryptoDH(group)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetCA(cert string) IGCryptoCAInfo {
+	return cryptoCreateCAInfo(cert)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetRSA(privateKey string, cert string) IGCryptoRSA {
+	return cryptoCreateRSA(privateKey, cert)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetRSAByDer(der []byte) IGCryptoRSA {
+	return cryptoCreateRSAByDER(der)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) CalculatePRFPlus(body []byte, hmacObj IGCryptoHMAC) []byte {
+	const round = 128
+	out := bytes.NewBuffer(nil)
+	t := bytes.NewBuffer(nil)
+	for i := 1; i <= round; i++ {
+		tempBuffer := bytes.NewBuffer(nil)
+		tempBuffer.Write(t.Bytes())
+		tempBuffer.Write(body)
+		tempBuffer.WriteByte(byte(i))
+		hmacRes, _ := hmacObj.GetHMAC(tempBuffer.Bytes())
+		t.Reset()
+		t.Write(hmacRes)
+		out.Write(hmacRes)
+	}
+	return out.Bytes()
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) CreateCryptoObject() IGCrypto {
+	return &cryptoObj{}
+}
