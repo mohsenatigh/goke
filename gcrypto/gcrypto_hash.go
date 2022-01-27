@@ -1,7 +1,6 @@
 package gcrypto
 
 import (
-	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -11,20 +10,18 @@ import (
 
 //---------------------------------------------------------------------------------------
 type cryptoHash struct {
-	hashType int
+	hashType GCryptHashAlg
 	hash     hash.Hash
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoHash) getHasher() hash.Hash {
 	switch thisPt.hashType {
-	case GCRYPTO_HASH_TYPE_MD5:
-		return md5.New()
-	case GCRYPTO_HASH_TYPE_SHA1:
+	case IANA_HASH_SHA1:
 		return sha1.New()
-	case GCRYPTO_HASH_TYPE_SHA256:
+	case IANA_HASH_SHA2_256:
 		return sha256.New()
-	case GCRYPTO_HASH_TYPE_SHA512:
+	case IANA_HASH_SHA2_512:
 		return sha512.New()
 	}
 	return nil
@@ -65,7 +62,7 @@ func (thisPt *cryptoHash) GetHash(in []byte) []byte {
 }
 
 //---------------------------------------------------------------------------------------
-func createCryptoHash(hType int) IGCryptoHash {
+func createCryptoHash(hType GCryptHashAlg) IGCryptoHash {
 	h := &cryptoHash{
 		hashType: hType,
 	}

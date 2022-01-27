@@ -11,39 +11,39 @@ import (
 	"log"
 )
 
-type cryptoHmac struct {
-	hmacType GCryptHmacAlg
+type cryptoAuth struct {
+	hmacType GCryptAuthAlg
 	key      []byte
 	hmac     hash.Hash
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) getHashFunc() func() hash.Hash {
+func (thisPt *cryptoAuth) getHashFunc() func() hash.Hash {
 	switch thisPt.hmacType {
-	case IANA_PRF_HMAC_MD5:
+	case IANA_AUTH_HMAC_MD5_96:
 		return md5.New
-	case IANA_PRF_HMAC_SHA1:
+	case IANA_AUTH_HMAC_SHA1_96:
 		return sha1.New
-	case IANA_PRF_HMAC_SHA2_256:
+	case IANA_AUTH_HMAC_SHA2_256_128:
 		return sha256.New
-	case IANA_PRF_HMAC_SHA2_512:
+	case IANA_AUTH_HMAC_SHA2_512_256:
 		return sha512.New
 	}
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) Start() error {
+func (thisPt *cryptoAuth) Start() error {
 	fnc := thisPt.getHashFunc()
 	if fnc == nil {
-		return errors.New("invalid HMAC function")
+		return errors.New("invalid Authentication function")
 	}
 	thisPt.hmac = hmac.New(fnc, thisPt.key)
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) Write(buffer []byte) error {
+func (thisPt *cryptoAuth) Write(buffer []byte) error {
 	if _, err := thisPt.hmac.Write(buffer); err != nil {
 		return err
 	}
@@ -51,24 +51,24 @@ func (thisPt *cryptoHmac) Write(buffer []byte) error {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) Final() []byte {
+func (thisPt *cryptoAuth) Final() []byte {
 	out := make([]byte, 64)
-	return thisPt.hmac.Sum(out)
+	return thisPt.hmac.Sum(out)[0:thisPt.hmacType.Size()]
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) GetHMAC(buffer []byte) ([]byte, error) {
+func (thisPt *cryptoAuth) GetHMAC(buffer []byte) ([]byte, error) {
 	if err := thisPt.Start(); err != nil {
 		return nil, err
 	}
 	if err := thisPt.Write(buffer); err != nil {
 		return nil, err
 	}
-	return thisPt.Final(), nil
+	return thisPt.Final()[0:thisPt.hmacType.Size()], nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) GetLen() int {
+func (thisPt *cryptoAuth) GetLen() int {
 	fnc := thisPt.getHashFunc()
 	if fnc == nil {
 		log.Printf("invalid HMAC function \n")
@@ -78,15 +78,15 @@ func (thisPt *cryptoHmac) GetLen() int {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoHmac) SetKey(key []byte) {
+func (thisPt *cryptoAuth) SetKey(key []byte) {
 	thisPt.key = make([]byte, len(key))
 	copy(thisPt.key, key)
 }
 
 //---------------------------------------------------------------------------------------
 
-func createCryptoHMAC(hType GCryptHmacAlg, key []byte) IGCryptoHMAC {
-	h := &cryptoHmac{
+func createCryptoAuth(hType GCryptAuthAlg, key []byte) IGCryptoAuth {
+	h := &cryptoAuth{
 		hmacType: hType,
 	}
 

@@ -2,13 +2,14 @@ package ike
 
 import (
 	"encoding/binary"
+	"errors"
 	"sync"
 	"time"
 )
 
 //---------------------------------------------------------------------------------------
 
-type IKESessionManagerConfig struct {
+type ikeSessionManagerConfig struct {
 	halfOpenSessionsLifeTime int64
 	inactiveSessionsLifeTime int64
 	removedSessionsLifeTime  int64
@@ -16,18 +17,18 @@ type IKESessionManagerConfig struct {
 
 //---------------------------------------------------------------------------------------
 
-type IKESessionManager struct {
-	sessions   map[uint64]IIKESession
+type ikeSessionManager struct {
+	sessions   map[uint64]*ikeSession
 	accessLock sync.RWMutex
-	config     IKESessionManagerConfig
+	config     ikeSessionManagerConfig
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKESessionManager) createRemoveList(cTime int64) []uint64 {
+func (thisPt *ikeSessionManager) createRemoveList(cTime int64) []uint64 {
 	removeList := []uint64{}
 
 	thisPt.accessLock.RLock()
-	defer thisPt.accessLock.Unlock()
+	defer thisPt.accessLock.RUnlock()
 
 	for k, v := range thisPt.sessions {
 
@@ -50,7 +51,7 @@ func (thisPt *IKESessionManager) createRemoveList(cTime int64) []uint64 {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKESessionManager) getSessionKey(spi []byte, spr []byte) uint64 {
+func (thisPt *ikeSessionManager) getSessionKey(spi []byte, spr []byte) uint64 {
 	k1, _ := binary.Uvarint(spi[0:8])
 	k2 := uint64(0)
 	if spr != nil {
@@ -60,13 +61,14 @@ func (thisPt *IKESessionManager) getSessionKey(spi []byte, spr []byte) uint64 {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKESessionManager) Find(spi []byte, spr []byte) IIKESession {
+func (thisPt *ikeSessionManager) Find(spi []byte, spr []byte) IIKESession {
 	thisPt.accessLock.RLock()
 	defer thisPt.accessLock.RUnlock()
 
 	key := thisPt.getSessionKey(spi, spr)
 
 	if session, fnd := thisPt.sessions[key]; fnd && session.IsActive() {
+		session.updateAccessTime()
 		return session
 	}
 
@@ -74,12 +76,30 @@ func (thisPt *IKESessionManager) Find(spi []byte, spr []byte) IIKESession {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKESessionManager) New(spi []byte, spr []byte) (IIKESession, error) {
+func (thisPt *ikeSessionManager) New(initiator bool, ispi []byte, rspi []byte) (IIKESession, error) {
+	thisPt.accessLock.Lock()
+	defer thisPt.accessLock.Unlock()
+
+	//check for duplicate SPI
+	key := thisPt.getSessionKey(ispi, rspi)
+	if _, fnd := thisPt.sessions[key]; fnd {
+		return nil, errors.New("duplicate spi")
+	}
+
+	//
+	params := ikeSessionInitParameters{
+		id:        key,
+		iSpi:      ispi,
+		rSpi:      rspi,
+		initiator: initiator,
+	}
+	session := createIKESession(&params)
+	thisPt.sessions[key] = session
 	return nil, nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKESessionManager) Timer(cTime int64) int {
+func (thisPt *ikeSessionManager) Timer(cTime int64) int {
 	if cTime == 0 {
 		cTime = time.Now().Unix()
 	}
@@ -100,3 +120,10 @@ func (thisPt *IKESessionManager) Timer(cTime int64) int {
 }
 
 //---------------------------------------------------------------------------------------
+func createIKESessionManager(conf *ikeSessionManagerConfig) IIKESessionManager {
+	sMan := &ikeSessionManager{
+		sessions: make(map[uint64]*ikeSession),
+		config:   *conf,
+	}
+	return sMan
+}

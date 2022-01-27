@@ -209,14 +209,14 @@ func (thisPt *ikeProtocolPacket) Decrypt(encrypt gcrypto.IGCryptoCipher, auth gc
 	}
 
 	//
-	encControlLen := (encrypt.GetIVLen() + auth.GetLen())
+	encControlLen := (encrypt.GetAlg().BlockSize() + auth.GetLen())
 	if len(payloadData) < encControlLen {
 		return nil, errors.New("invalid encrypted payload")
 	}
 
 	//read IV
-	iv := payloadData[0:encrypt.GetIVLen()]
-	body := payloadData[encrypt.GetIVLen() : len(payloadData)-encControlLen]
+	iv := payloadData[0:encrypt.GetAlg().BlockSize()]
+	body := payloadData[encrypt.GetAlg().BlockSize() : len(payloadData)-encControlLen]
 	if len(body) == 0 {
 		return nil, errors.New("invalid encrypted payload")
 	}
@@ -329,6 +329,12 @@ func (thisPt *ikeProtocolPacket) GetPayloadDissector() IIKEPacketPayloadDissecto
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeProtocolPacket) GetPayloadFactory() IIKEPacketPayloadFactory {
 	return thisPt.payloadFactory
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeProtocolPacket) SetSequence(flag uint8, seq uint32) {
+	thisPt.header.Id = seq
+	thisPt.header.Flags = flag
 }
 
 //---------------------------------------------------------------------------------------

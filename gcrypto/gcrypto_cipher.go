@@ -8,7 +8,7 @@ import (
 )
 
 type cryptoCipher struct {
-	cipherType int
+	cipherType GCryptCipherAlg
 	iv         [32]byte
 	key        []byte
 }
@@ -16,9 +16,7 @@ type cryptoCipher struct {
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoCipher) getCipher(key []byte) (cipher.Block, error) {
 	switch thisPt.cipherType {
-	case GCRYPTO_CIPHER_AES128:
-	case GCRYPTO_CIPHER_AES192:
-	case GCRYPTO_CIPHER_AES256:
+	case IANA_ENCR_AES_CBC:
 		return aes.NewCipher(key)
 	}
 	return nil, errors.New("invalid cipher")
@@ -34,7 +32,7 @@ func (thisPt *cryptoCipher) Encrypt(in []byte, out []byte, iv []byte) error {
 	blockMode.CryptBlocks(out, in)
 
 	//update iv
-	blockSize := thisPt.GetIVLen()
+	blockSize := thisPt.cipherType.BlockSize()
 	copy(thisPt.iv[:blockSize], out[:blockSize])
 	return nil
 }
@@ -51,43 +49,19 @@ func (thisPt *cryptoCipher) Decrypt(in []byte, out []byte, iv []byte) error {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoCipher) GetIVLen() int {
-	switch thisPt.cipherType {
-	case GCRYPTO_CIPHER_AES128:
-	case GCRYPTO_CIPHER_AES192:
-	case GCRYPTO_CIPHER_AES256:
-		return aes.BlockSize
-	}
-	return 0
-}
-
-//---------------------------------------------------------------------------------------
 func (thisPt *cryptoCipher) GetKeyLen() int {
-	switch thisPt.cipherType {
-	case GCRYPTO_CIPHER_AES128:
-		return 16
-	case GCRYPTO_CIPHER_AES192:
-		return 24
-	case GCRYPTO_CIPHER_AES256:
-		return 32
-	}
-	return 0
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *cryptoCipher) GetBlockLen() int {
-	return thisPt.GetIVLen()
+	return len(thisPt.key)
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoCipher) GetPadLen(bufferSize int) int {
-	blockSize := thisPt.GetBlockLen()
+	blockSize := thisPt.cipherType.BlockSize()
 	return (blockSize - (bufferSize % blockSize))
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoCipher) GetIV() []byte {
-	blockSize := thisPt.GetBlockLen()
+	blockSize := thisPt.cipherType.BlockSize()
 	return thisPt.iv[:blockSize]
 }
 
@@ -98,13 +72,23 @@ func (thisPt *cryptoCipher) SetKey(key []byte) {
 }
 
 //---------------------------------------------------------------------------------------
-func createCryptoCipher(cType int, key []byte) IGCryptoCipher {
+func (thisPt *cryptoCipher) GetType() GCryptCipherAlg {
+	return thisPt.cipherType
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoCipher) GetAlg() GCryptCipherAlg {
+	return thisPt.cipherType
+}
+
+//---------------------------------------------------------------------------------------
+func createCryptoCipher(cType GCryptCipherAlg, key []byte) IGCryptoCipher {
 	h := &cryptoCipher{
 		cipherType: cType,
 	}
-	crand.Read(h.iv[:])
 	if key != nil {
 		h.SetKey(key)
 	}
+	crand.Read(h.iv[:])
 	return h
 }

@@ -22,11 +22,11 @@ const (
 
 //---------------------------------------------------------------------------------------
 type IKEPayloadProposalInfo struct {
-	EncryptionAlg       int
+	EncryptionAlg       gcrypto.GCryptCipherAlg
 	EncryptionAlgKeyLen int
-	IntegrityAlg        int
-	Prf                 int
-	DH                  int
+	IntegrityAlg        gcrypto.GCryptAuthAlg
+	Prf                 gcrypto.GCryptHmacAlg
+	DH                  gcrypto.GCryptoDH
 	ESN                 int
 	Protocol            int
 	ESP                 [8]byte
@@ -163,6 +163,7 @@ type IIKEPacket interface {
 	GetPayloadDissector() IIKEPacketPayloadDissector
 	GetPayloadFactory() IIKEPacketPayloadFactory
 	HasError() (bool, int)
+	SetSequence(flag uint8, seq uint32)
 }
 
 //---------------------------------------------------------------------------------------
@@ -230,12 +231,13 @@ type IKEPhase1Key struct {
 
 //---------------------------------------------------------------------------------------
 type IKEPhase1KeyInfo struct {
-	IKey IKEPhase1Key
-	RKey IKEPhase1Key
-	SKD  []byte
-	Prf  gcrypto.IGCryptoHMAC
-	Enc  gcrypto.IGCryptoCipher
-	Int  gcrypto.IGCryptoHMAC
+	IKey   IKEPhase1Key
+	RKey   IKEPhase1Key
+	SKD    []byte
+	Prf    gcrypto.GCryptHmacAlg
+	Enc    gcrypto.GCryptCipherAlg
+	Int    gcrypto.GCryptAuthAlg
+	KeyLen int
 }
 
 //---------------------------------------------------------------------------------------
@@ -246,20 +248,20 @@ type IKEPhase2Key struct {
 
 //---------------------------------------------------------------------------------------
 type IKEPhase2KeyInfo struct {
-	IKey IKEPhase2Key
-	RKey IKEPhase2Key
-	Enc  gcrypto.IGCryptoCipher
-	Int  gcrypto.IGCryptoHMAC
+	IKey   IKEPhase2Key
+	RKey   IKEPhase2Key
+	Enc    gcrypto.GCryptCipherAlg
+	Int    gcrypto.GCryptAuthAlg
+	KeyLen int
 }
 
 //---------------------------------------------------------------------------------------
 const (
-	IKE_SESSION_STATUS_NONE            = 0
 	IKE_SESSION_STATUS_NEW             = 1
 	IKE_SESSION_STATUS_INIT_SEND       = 2
 	IKE_SESSION_STATUS_INIT_RECEIVE    = 3
-	IKE_SESSION_STATUS_INIT_AUTH_SEND  = 4
-	IKE_SESSION_STATUS_INIT_AUTH_DONE  = 5
+	IKE_SESSION_STATUS_AUTH_SEND       = 4
+	IKE_SESSION_STATUS_AUTH_DONE       = 5
 	IKE_SESSION_STATUS_INIT_TERMINATED = 6
 )
 
@@ -278,6 +280,8 @@ type IIKESession interface {
 	Remove()
 	IsActive() bool
 	IsHalfOpen() bool
+	IsEncrypted() bool
+	SetEncrypted(bool)
 	GetCreationTime() int64
 	GetAccessTime() int64
 	SetLocalNonce([]byte)
@@ -292,36 +296,52 @@ type IIKESession interface {
 	GetResponderSPI() []byte
 	GetPhase1KeyInfo() *IKEPhase1KeyInfo
 	GetPhase2KeyInfo() *IKEPhase2KeyInfo
-	SetFlag(int)
-	HaveFlag(int) bool
+	GetLocalPhase1Key() *IKEPhase1Key
+	GetRemotePhase1Key() *IKEPhase1Key
+	SetFlag(uint64)
+	HaveFlag(uint64) bool
 	GetPrevPacket() []byte
 	SetPrevPacket([]byte)
+	Lock()
+	UnLock()
+	GetState() int
+	UpdateState(int)
+	GetAddr() (*net.UDPAddr, *net.UDPAddr)
+	GetNATAddr() (*net.UDPAddr, *net.UDPAddr)
+	SetNATAddr(local *net.UDPAddr, remote *net.UDPAddr)
+	GetExpectedSeq() uint32
+	AddExpectedSeq()
 }
 
 //---------------------------------------------------------------------------------------
-type IKEProcessContextProfile struct {
-	EnableTransport bool
-	EnableFragment  bool
-	EnableNat       bool
-	CA              gcrypto.IGCryptoRSA
-	Certificate     gcrypto.IGCryptoRSA
-	PrivateKey      gcrypto.IGCryptoRSA
-	PeerCertificate gcrypto.IGCryptoRSA
-	VendorID        string
-	PSK             string
-	UsePSK          bool
-	FQDN            string
-	LocalTS         IKEPayloadTrafficSelectorInfo
-	RemoteTS        IKEPayloadTrafficSelectorInfo
+type IKEProfile struct {
+	HalfOpenSessionsLifeTime int64
+	InactiveSessionsLifeTime int64
+	RemovedSessionsLifeTime  int64
+	EnableTransport          bool
+	EnableFragment           bool
+	EnableNat                bool
+	CA                       gcrypto.IGCryptoRSA
+	Certificate              gcrypto.IGCryptoRSA
+	PrivateKey               gcrypto.IGCryptoRSA
+	PeerCertificate          gcrypto.IGCryptoRSA
+	VendorID                 string
+	PSK                      string
+	UsePSK                   bool
+	FQDN                     string
+	LocalTS                  IKEPayloadTrafficSelectorInfo
+	RemoteTS                 IKEPayloadTrafficSelectorInfo
+	Phase1Proposal           *IKEPayloadProposalInfo
+	Phase2Proposal           *IKEPayloadProposalInfo
+	Cookie                   interface{}
 }
 
 //---------------------------------------------------------------------------------------
 type IIKEProcessContext interface {
 	RemoteAddress() *net.UDPAddr
 	LocalAddress() *net.UDPAddr
-	GetPhase1Proposal() (IKEPayloadProposalInfo, bool)
-	GetPhase2Proposal() (IKEPayloadProposalInfo, bool)
-	GetProfile() IKEProcessContextProfile
+	Nat() bool
+	GetProfile() IKEProfile
 	GetSession() IIKESession
 }
 
@@ -340,15 +360,12 @@ type IIKESessionManager interface {
 
 //---------------------------------------------------------------------------------------
 type IIKEActor interface {
-	InstallESP(session IIKESession)
-	RemoveESP(session IIKESession)
+	InstallESP(context IIKEProcessContext)
+	RemoveESP(context IIKEProcessContext)
+	SendControlData(data []byte, context IIKEProcessContext)
 }
 
 //---------------------------------------------------------------------------------------
-type TIKETimerCallback func(int, []byte)
-
 type IIKE interface {
-	Process(in []byte, profileID int, nat bool) (int, []byte, error)
-	Init(profileID int) (int, []byte, error)
-	SetTimerCallback(callBack TIKETimerCallback)
+	Process(in []byte, nat bool, local *net.UDPAddr, remote *net.UDPAddr) ([]byte, error)
 }

@@ -5,19 +5,28 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net"
 
 	"github.com/mohsenatigh/goke/gcrypto"
 )
 
 //---------------------------------------------------------------------------------------
-type IKEStateMachine struct {
-	packetFactory IIKEPacketFactory
-	crypto        gcrypto.IGCrypto
-	actor         IIKEActor
+type ikeStateMachine struct {
+	packetFactory  IIKEPacketFactory
+	crypto         gcrypto.IGCrypto
+	actor          IIKEActor
+	sessionManager IIKESessionManager
+	ikeProfile     IKEProfile
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) serializeID(id *IKEPayloadIDInfo) []byte {
+func (thisPt *ikeStateMachine) terminateSession(session IIKESession) {
+	session.UpdateState(IKE_SESSION_STATUS_INIT_TERMINATED)
+	session.Remove()
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) serializeID(id *IKEPayloadIDInfo) []byte {
 	buffer := bytes.NewBuffer(nil)
 	header := IKEProtocolIDHeader{}
 	header.IDType = id.IDType
@@ -27,7 +36,7 @@ func (thisPt *IKEStateMachine) serializeID(id *IKEPayloadIDInfo) []byte {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) selectOrReadPhase2Info(packet IIKEPacket, context IIKEProcessContext) (*IKEPayloadProposalInfo, error) {
+func (thisPt *ikeStateMachine) selectOrReadPhase2Info(packet IIKEPacket, context IIKEProcessContext) (*IKEPayloadProposalInfo, error) {
 
 	var phase2Proposal *IKEPayloadProposalInfo
 	otherProposal, err := packet.GetPayloadDissector().GetPhase2Proposal()
@@ -36,8 +45,8 @@ func (thisPt *IKEStateMachine) selectOrReadPhase2Info(packet IIKEPacket, context
 	}
 
 	//check for phase2 match and generate keys
-	if prop, have := context.GetPhase2Proposal(); have {
-		phase2Proposal = thisPt.haveProposal(&prop, otherProposal, false)
+	if prop := context.GetProfile().Phase1Proposal; prop != nil {
+		phase2Proposal = thisPt.haveProposal(prop, otherProposal, false)
 	} else {
 		phase2Proposal = thisPt.getBestProposal(otherProposal, false)
 	}
@@ -49,111 +58,49 @@ func (thisPt *IKEStateMachine) selectOrReadPhase2Info(packet IIKEPacket, context
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getPhase1DefaultProposal() IKEPayloadProposalInfo {
+func (thisPt *ikeStateMachine) getPhase1DefaultProposal() IKEPayloadProposalInfo {
 	proposal := IKEPayloadProposalInfo{}
 	proposal.DH = 30
-	proposal.EncryptionAlg = IKEProtocolTransformEncALG_ENCR_AES_CBC
+	proposal.EncryptionAlg = gcrypto.IANA_ENCR_AES_CBC
 	proposal.EncryptionAlgKeyLen = 128
-	proposal.IntegrityAlg = IKEProtocolTransformEncALG_HMAC_SHA1
-	proposal.Prf = IKEProtocolTransformEncALG_HMAC_SHA1
+	proposal.IntegrityAlg = gcrypto.IANA_AUTH_HMAC_SHA1_96
+	proposal.Prf = gcrypto.IANA_PRF_HMAC_SHA2_256
 	proposal.EspSize = 4
 	return proposal
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getPhase2DefaultProposal() IKEPayloadProposalInfo {
+func (thisPt *ikeStateMachine) getPhase2DefaultProposal() IKEPayloadProposalInfo {
 	proposal := IKEPayloadProposalInfo{}
-	proposal.EncryptionAlg = IKEProtocolTransformEncALG_ENCR_AES_CBC
+	proposal.EncryptionAlg = gcrypto.IANA_ENCR_AES_CBC
 	proposal.EncryptionAlgKeyLen = 128
-	proposal.IntegrityAlg = IKEProtocolTransformEncALG_HMAC_SHA1
+	proposal.IntegrityAlg = gcrypto.IANA_AUTH_HMAC_SHA1_96
 	proposal.EspSize = 4
 	return proposal
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) isSupportedLocalDH(dh int) error {
-	dhMap := map[int]bool{
-		19: true,
-		20: true,
-		21: true,
-		27: true,
-		28: true,
-		29: true,
-	}
-
-	if _, fnd := dhMap[dh]; fnd {
-		return nil
-	}
-
-	return errors.New("unsupported DH group")
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getLocalEncAlg(ikeenc int, keyLen int) (int, error) {
-	type ikeEncInfo [2]int
-
-	algMap := map[ikeEncInfo]int{
-		{IKEProtocolTransformEncALG_ENCR_AES_CBC, 128}: gcrypto.GCRYPTO_CIPHER_AES128,
-		{IKEProtocolTransformEncALG_ENCR_AES_CBC, 192}: gcrypto.GCRYPTO_CIPHER_AES192,
-		{IKEProtocolTransformEncALG_ENCR_AES_CBC, 256}: gcrypto.GCRYPTO_CIPHER_AES256,
-	}
-
-	if res, fnd := algMap[ikeEncInfo{ikeenc, keyLen}]; fnd {
-		return res, nil
-	}
-
-	return -1, errors.New("unsupported encryption protocol")
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getLocalHMACAlg(ikeHash int) (int, error) {
-	algMap := map[int]int{
-		IKEProtocolTransformEncALG_HMAC_MD5:    gcrypto.GCRYPTO_HMAC_TYPE_MD5,
-		IKEProtocolTransformEncALG_HMAC_SHA1:   gcrypto.GCRYPTO_HMAC_TYPE_SHA1,
-		IKEProtocolTransformEncALG_HMAC_SHA256: gcrypto.GCRYPTO_HMAC_TYPE_SHA256,
-	}
-
-	if res, fnd := algMap[ikeHash]; fnd {
-		return res, nil
-	}
-
-	return -1, errors.New("unsupported hmac protocol")
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getLocalAuthFunc(ikeHash int) (alg int, len int, err error) {
-	type ikeAuthInfo [2]int
-	algMap := map[int]ikeAuthInfo{
-		IKEProtocolAuthFunction_MD5_96:       {gcrypto.GCRYPTO_HMAC_TYPE_MD5, 96},
-		IKEProtocolAuthFunction_SHA1_96:      {gcrypto.GCRYPTO_HMAC_TYPE_SHA1, 96},
-		IKEProtocolAuthFunction_SHA2_256_128: {gcrypto.GCRYPTO_HMAC_TYPE_SHA256, 128},
-	}
-
-	if res, fnd := algMap[ikeHash]; fnd {
-		return res[0], res[1], nil
-	}
-
-	return -1, -1, errors.New("unsupported hash function")
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) getBestProposal(list []IKEPayloadProposalInfo, phase1 bool) *IKEPayloadProposalInfo {
+func (thisPt *ikeStateMachine) getBestProposal(list []IKEPayloadProposalInfo, phase1 bool) *IKEPayloadProposalInfo {
 	for _, l := range list {
+		enc := gcrypto.GCryptCipherAlg(l.EncryptionAlg)
+		auth := gcrypto.GCryptAuthAlg(l.IntegrityAlg)
+		prf := gcrypto.GCryptHmacAlg(l.Prf)
+		dhGroup := gcrypto.GCryptoDH(l.DH)
 
-		if _, err := thisPt.getLocalEncAlg(l.EncryptionAlg, l.EncryptionAlgKeyLen); err != nil {
+		if !enc.Validate(l.EncryptionAlgKeyLen) {
 			continue
 		}
 
-		if _, _, err := thisPt.getLocalAuthFunc(l.IntegrityAlg); err != nil {
+		if !auth.Validate() {
 			continue
 		}
 
 		if phase1 {
-			if err := thisPt.isSupportedLocalDH(l.DH); err != nil {
+			if !dhGroup.Validate() {
 				continue
 			}
 
-			if _, err := thisPt.getLocalHMACAlg(l.Prf); err != nil {
+			if !prf.Validate() {
 				continue
 			}
 		}
@@ -163,7 +110,7 @@ func (thisPt *IKEStateMachine) getBestProposal(list []IKEPayloadProposalInfo, ph
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) haveProposal(pIn *IKEPayloadProposalInfo, list []IKEPayloadProposalInfo, phase1 bool) *IKEPayloadProposalInfo {
+func (thisPt *ikeStateMachine) haveProposal(pIn *IKEPayloadProposalInfo, list []IKEPayloadProposalInfo, phase1 bool) *IKEPayloadProposalInfo {
 	for _, item := range list {
 		if item.EncryptionAlg != pIn.EncryptionAlg || item.EncryptionAlgKeyLen != pIn.EncryptionAlgKeyLen {
 			continue
@@ -193,7 +140,7 @@ func (thisPt *IKEStateMachine) haveProposal(pIn *IKEPayloadProposalInfo, list []
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) calculatePhase2KeyMaterial(session IIKESession) {
+func (thisPt *ikeStateMachine) calculatePhase2KeyMaterial(session IIKESession) {
 
 	readKey := func(r *bytes.Reader, len int) []byte {
 		out := make([]byte, len)
@@ -206,22 +153,21 @@ func (thisPt *IKEStateMachine) calculatePhase2KeyMaterial(session IIKESession) {
 	bodyBuffer.Write(session.GetResponderNonce())
 
 	//
-	hmacObj := session.GetPhase1KeyInfo().Prf
-	hmacObj.SetKey(session.GetPhase1KeyInfo().SKD)
+	hmacObj := thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, session.GetPhase1KeyInfo().SKD)
 
 	//
 	prfBuf := thisPt.crypto.CalculatePRFPlus(bodyBuffer.Bytes(), hmacObj)
 
 	//read keys
 	prfReader := bytes.NewReader(prfBuf)
-	session.GetPhase2KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase2KeyInfo().Enc.GetKeyLen())
-	session.GetPhase2KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase2KeyInfo().Int.GetLen())
-	session.GetPhase2KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase2KeyInfo().Enc.GetKeyLen())
-	session.GetPhase2KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase2KeyInfo().Int.GetLen())
+	session.GetPhase2KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase2KeyInfo().KeyLen/8)
+	session.GetPhase2KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase2KeyInfo().Int.Size())
+	session.GetPhase2KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase2KeyInfo().KeyLen/8)
+	session.GetPhase2KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase2KeyInfo().Int.Size())
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) calculatePhase1KeyMaterial(session IIKESession, peerPubKey []byte) error {
+func (thisPt *ikeStateMachine) calculatePhase1KeyMaterial(session IIKESession, peerPubKey []byte) error {
 	readKey := func(r *bytes.Reader, len int) []byte {
 		out := make([]byte, len)
 		r.Read(out)
@@ -235,8 +181,7 @@ func (thisPt *IKEStateMachine) calculatePhase1KeyMaterial(session IIKESession, p
 	}
 
 	//set PRF key
-	hmacObj := session.GetPhase1KeyInfo().Prf
-	hmacObj.SetKey(key)
+	hmacObj := thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, key)
 
 	//{SK_d | SK_ai | SK_ar | SK_ei | SK_er | SK_pi | SK_pr } = prf+ (SKEYSEED, Ni | Nr | SPIi | SPIr )
 	bodyBuffer := bytes.NewBuffer(nil)
@@ -253,72 +198,61 @@ func (thisPt *IKEStateMachine) calculatePhase1KeyMaterial(session IIKESession, p
 
 	//read keys
 	prfReader := bytes.NewReader(prfBuf)
-	session.GetPhase1KeyInfo().SKD = readKey(prfReader, session.GetPhase1KeyInfo().Prf.GetLen())
-	session.GetPhase1KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.GetLen())
-	session.GetPhase1KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.GetLen())
-	session.GetPhase1KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().Enc.GetKeyLen())
-	session.GetPhase1KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().Enc.GetKeyLen())
-	session.GetPhase1KeyInfo().IKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.GetLen())
-	session.GetPhase1KeyInfo().RKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.GetLen())
+	session.GetPhase1KeyInfo().SKD = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
+	session.GetPhase1KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.Size())
+	session.GetPhase1KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.Size())
+	session.GetPhase1KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen/8)
+	session.GetPhase1KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen/8)
+	session.GetPhase1KeyInfo().IKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
+	session.GetPhase1KeyInfo().RKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
 
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) initSession() {
-	//SET DH
-	//SET NONCE
-}
+func (thisPt *ikeStateMachine) initSessionIKEKeyObjects(session IIKESession, proposal *IKEPayloadProposalInfo) error {
 
-//---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) initSessionIKEKeyObjects(session IIKESession, proposal *IKEPayloadProposalInfo) error {
-
-	//read encryption
-	if encAlg, err := thisPt.getLocalEncAlg(proposal.EncryptionAlg, proposal.EncryptionAlgKeyLen); err != nil {
-		return err
-	} else {
-		session.GetPhase1KeyInfo().Enc = thisPt.crypto.GetCipher(encAlg, nil)
+	if !proposal.EncryptionAlg.Validate(proposal.EncryptionAlgKeyLen) {
+		return errors.New("invalid encryption algorithm")
 	}
 
-	//read integration
-	if intAlg, err := thisPt.getLocalHMACAlg(proposal.IntegrityAlg); err != nil {
-		return err
-	} else {
-		session.GetPhase1KeyInfo().Int = thisPt.crypto.GetHMAC(intAlg, nil)
+	if !proposal.IntegrityAlg.Validate() {
+		return errors.New("invalid integrity algorithm")
 	}
 
-	//read prf
-	if intAlg, err := thisPt.getLocalHMACAlg(proposal.Prf); err != nil {
-		return err
-	} else {
-		session.GetPhase1KeyInfo().Prf = thisPt.crypto.GetHMAC(intAlg, nil)
+	if !proposal.Prf.Validate() {
+		return errors.New("invalid prf algorithm")
 	}
 
+	if !proposal.DH.Validate() {
+		return errors.New("invalid DH group")
+	}
+
+	session.GetPhase1KeyInfo().Enc = proposal.EncryptionAlg
+	session.GetPhase1KeyInfo().Int = proposal.IntegrityAlg
+	session.GetPhase1KeyInfo().Prf = proposal.Prf
+	session.GetPhase1KeyInfo().KeyLen = proposal.EncryptionAlgKeyLen
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) initSessionESPKeyObjects(session IIKESession, proposal *IKEPayloadProposalInfo) error {
+func (thisPt *ikeStateMachine) initSessionESPKeyObjects(session IIKESession, proposal *IKEPayloadProposalInfo) error {
 
-	//read encryption
-	if encAlg, err := thisPt.getLocalEncAlg(proposal.EncryptionAlg, proposal.EncryptionAlgKeyLen); err != nil {
-		return err
-	} else {
-		session.GetPhase2KeyInfo().Enc = thisPt.crypto.GetCipher(encAlg, nil)
+	if !proposal.EncryptionAlg.Validate(proposal.EncryptionAlgKeyLen) {
+		return errors.New("invalid encryption algorithm")
 	}
 
-	//read integration
-	if intAlg, err := thisPt.getLocalHMACAlg(proposal.IntegrityAlg); err != nil {
-		return err
-	} else {
-		session.GetPhase2KeyInfo().Int = thisPt.crypto.GetHMAC(intAlg, nil)
+	if !proposal.IntegrityAlg.Validate() {
+		return errors.New("invalid integrity algorithm")
 	}
 
+	session.GetPhase2KeyInfo().Enc = proposal.EncryptionAlg
+	session.GetPhase2KeyInfo().Int = proposal.IntegrityAlg
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) needCertificate(packet IIKEPacket, context IIKEProcessContext) bool {
+func (thisPt *ikeStateMachine) needCertificate(packet IIKEPacket, context IIKEProcessContext) bool {
 
 	caObject := context.GetProfile().CA
 	if caObject == nil {
@@ -340,7 +274,7 @@ func (thisPt *IKEStateMachine) needCertificate(packet IIKEPacket, context IIKEPr
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) checkAuth(packet IIKEPacket, context IIKEProcessContext) error {
+func (thisPt *ikeStateMachine) checkAuth(packet IIKEPacket, context IIKEProcessContext) error {
 	//
 	session := context.GetSession()
 
@@ -361,7 +295,7 @@ func (thisPt *IKEStateMachine) checkAuth(packet IIKEPacket, context IIKEProcessC
 	info.ID = thisPt.serializeID(&id)
 	info.Initiator = session.IsInitiator()
 	info.Nonce = session.GetPeerNonce()
-	info.PRF = session.GetPhase1KeyInfo().Prf
+	info.PRF = thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, session.GetPhase1KeyInfo().SKD)
 	info.PSK = []byte(context.GetProfile().PSK)
 	info.PrivateKey = context.GetProfile().PrivateKey
 	info.PublicKey = context.GetProfile().Certificate
@@ -371,7 +305,7 @@ func (thisPt *IKEStateMachine) checkAuth(packet IIKEPacket, context IIKEProcessC
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) makeChildSA(context IIKEProcessContext, phase2Proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) makeChildSA(context IIKEProcessContext, phase2Proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
 	//
 	session := context.GetSession()
 
@@ -388,7 +322,7 @@ func (thisPt *IKEStateMachine) makeChildSA(context IIKEProcessContext, phase2Pro
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) makeAuth(context IIKEProcessContext, phase2Proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) makeAuth(context IIKEProcessContext, phase2Proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
 	session := context.GetSession()
 
 	//create ID object
@@ -436,7 +370,7 @@ func (thisPt *IKEStateMachine) makeAuth(context IIKEProcessContext, phase2Propos
 	info.Auth.ID = thisPt.serializeID(&id)
 	info.Auth.Initiator = info.Initiator
 	info.Auth.Nonce = session.GetMyNonce()
-	info.Auth.PRF = session.GetPhase1KeyInfo().Prf
+	info.Auth.PRF = thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, session.GetPhase1KeyInfo().SKD)
 	info.Auth.PSK = []byte(context.GetProfile().PSK)
 	info.Auth.PrivateKey = context.GetProfile().PrivateKey
 	info.Auth.PublicKey = context.GetProfile().Certificate
@@ -450,7 +384,7 @@ func (thisPt *IKEStateMachine) makeAuth(context IIKEProcessContext, phase2Propos
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) checkTS(context IIKEProcessContext, its *IKEPayloadTrafficSelectorInfo, rts *IKEPayloadTrafficSelectorInfo) bool {
+func (thisPt *ikeStateMachine) checkTS(context IIKEProcessContext, its *IKEPayloadTrafficSelectorInfo, rts *IKEPayloadTrafficSelectorInfo) bool {
 	//
 	compareTS := func(a *IKEPayloadTrafficSelectorInfo, b *IKEPayloadTrafficSelectorInfo) bool {
 		if len(a.TrafficPolicy) != len(b.TrafficPolicy) {
@@ -495,7 +429,7 @@ func (thisPt *IKEStateMachine) checkTS(context IIKEProcessContext, its *IKEPaylo
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) makeInitResponse(context IIKEProcessContext, proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) makeInitResponse(context IIKEProcessContext, proposal *IKEPayloadProposalInfo) (IIKEPacket, error) {
 	session := context.GetSession()
 
 	ipI := context.LocalAddress().IP
@@ -522,7 +456,7 @@ func (thisPt *IKEStateMachine) makeInitResponse(context IIKEProcessContext, prop
 			IPI:  ipI,
 			IPR:  ipR,
 			Src:  true,
-			Hash: thisPt.crypto.GetHash(gcrypto.GCRYPTO_HASH_TYPE_SHA1),
+			Hash: thisPt.crypto.GetHash(gcrypto.IANA_HASH_SHA1),
 		},
 
 		NatInfoR: IKEPayloadNatInfo{
@@ -531,7 +465,7 @@ func (thisPt *IKEStateMachine) makeInitResponse(context IIKEProcessContext, prop
 			IPI:  ipI,
 			IPR:  ipR,
 			Src:  false,
-			Hash: thisPt.crypto.GetHash(gcrypto.GCRYPTO_HASH_TYPE_SHA1),
+			Hash: thisPt.crypto.GetHash(gcrypto.IANA_HASH_SHA1),
 		},
 	}
 
@@ -539,12 +473,13 @@ func (thisPt *IKEStateMachine) makeInitResponse(context IIKEProcessContext, prop
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) ProcessInitPacket(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) processInitPacket(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
 
 	var phase1Proposal *IKEPayloadProposalInfo
 	session := context.GetSession()
 
 	returnErr := func(code uint16, err error) (IIKEPacket, error) {
+		thisPt.terminateSession(session)
 		packet, _ := thisPt.packetFactory.MakeInformationNotify(code)
 		return packet, err
 	}
@@ -561,8 +496,8 @@ func (thisPt *IKEStateMachine) ProcessInitPacket(packet IIKEPacket, context IIKE
 	}
 
 	//check for match
-	if prop, have := context.GetPhase1Proposal(); have {
-		phase1Proposal = thisPt.haveProposal(&prop, otherProposal, true)
+	if prop := context.GetProfile().Phase2Proposal; prop != nil {
+		phase1Proposal = thisPt.haveProposal(prop, otherProposal, true)
 	} else {
 		phase1Proposal = thisPt.getBestProposal(otherProposal, true)
 	}
@@ -576,8 +511,14 @@ func (thisPt *IKEStateMachine) ProcessInitPacket(packet IIKEPacket, context IIKE
 	if err != nil {
 		return returnErr(IKEProtocolNotifyCodes_INVALID_SYNTAX, err)
 	}
-	if err = thisPt.isSupportedLocalDH(group); err != nil {
+
+	if !gcrypto.GCryptoDH(group).Validate() {
 		return returnErr(IKEProtocolNotifyCodes_NO_PROPOSAL_CHOSEN, err)
+	}
+
+	//check for local DH
+	if session.GetDHInfo() == nil {
+		session.SetDHInfo(thisPt.crypto.GetDH(phase1Proposal.DH))
 	}
 
 	//read peer nonce
@@ -596,6 +537,7 @@ func (thisPt *IKEStateMachine) ProcessInitPacket(packet IIKEPacket, context IIKE
 	if err := thisPt.calculatePhase1KeyMaterial(session, peerPublicKey); err != nil {
 		return returnErr(IKEProtocolNotifyCodes_INVALID_SYNTAX, err)
 	}
+	session.SetEncrypted(true)
 
 	//check for fragmentation
 	if packet.GetPayloadDissector().GetHaveFragmentSupport() {
@@ -625,24 +567,26 @@ func (thisPt *IKEStateMachine) ProcessInitPacket(packet IIKEPacket, context IIKE
 
 	//create response
 	if !session.IsInitiator() {
+		session.UpdateState(IKE_SESSION_STATUS_INIT_RECEIVE)
 		return thisPt.makeInitResponse(context, phase1Proposal)
 	}
 
 	//get phase2 proposal
-	phase2Proposal, havePhase2 := context.GetPhase2Proposal()
-	if !havePhase2 {
-		phase2Proposal = thisPt.getPhase2DefaultProposal()
+	phase2Proposal := thisPt.getPhase2DefaultProposal()
+	if context.GetProfile().Phase2Proposal != nil {
+		phase2Proposal = *context.GetProfile().Phase2Proposal
 	}
-
+	session.UpdateState(IKE_SESSION_STATUS_AUTH_SEND)
 	return thisPt.makeAuth(context, &phase2Proposal)
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) ProcessAuthPacket(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) processAuthPacket(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
 
 	session := context.GetSession()
 
 	returnErr := func(code uint16, err error) (IIKEPacket, error) {
+		thisPt.terminateSession(session)
 		packet, _ := thisPt.packetFactory.MakeInformationNotify(code)
 		return packet, err
 	}
@@ -690,7 +634,10 @@ func (thisPt *IKEStateMachine) ProcessAuthPacket(packet IIKEPacket, context IIKE
 	thisPt.calculatePhase2KeyMaterial(session)
 
 	//install session
-	thisPt.actor.InstallESP(session)
+	thisPt.actor.InstallESP(context)
+
+	//every thing seems good in my side
+	session.UpdateState(IKE_SESSION_STATUS_AUTH_DONE)
 
 	//
 	if session.IsInitiator() {
@@ -706,7 +653,7 @@ func (thisPt *IKEStateMachine) ProcessAuthPacket(packet IIKEPacket, context IIKE
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) ProcessChildSA(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) processChildSA(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
 	//
 	session := context.GetSession()
 
@@ -736,7 +683,7 @@ func (thisPt *IKEStateMachine) ProcessChildSA(packet IIKEPacket, context IIKEPro
 	thisPt.calculatePhase2KeyMaterial(session)
 
 	//install new esp key
-	thisPt.actor.InstallESP(session)
+	thisPt.actor.InstallESP(context)
 	if session.IsInitiator() {
 		return nil, nil
 	}
@@ -746,7 +693,7 @@ func (thisPt *IKEStateMachine) ProcessChildSA(packet IIKEPacket, context IIKEPro
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) ProcessInformation(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) processInformation(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
 
 	//TODO check for KEEP alive
 	if err, code := packet.HasError(); err {
@@ -775,26 +722,167 @@ func (thisPt *IKEStateMachine) ProcessInformation(packet IIKEPacket, context IIK
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *IKEStateMachine) Process(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+func (thisPt *ikeStateMachine) createNewResponderSession(packet IIKEPacket, local, remote *net.UDPAddr) (IIKESession, error) {
+	if packet.GetHeader().ExType != IKEProtocolExChangeType_IKE_SA_INIT {
+		return nil, errors.New("invalid IKE packet")
+	}
+
+	//generate responder SPI
+	rspi := thisPt.crypto.GenerateRandom(IKE_PROTOCOL_SP_LEN)
+	session, err := thisPt.sessionManager.New(false, packet.GetHeader().ISPI[:], rspi)
+	if err != nil {
+		return nil, err
+	}
+
+	//set nonce
+	nonce := thisPt.crypto.GenerateRandom(IKE_PROTOCOL_NONCE_LEN)
+	session.SetLocalNonce(nonce)
+
+	return session, nil
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) processPacket(packet IIKEPacket, context IIKEProcessContext) (IIKEPacket, error) {
+
+	state := context.GetSession().GetState()
 
 	switch packet.GetHeader().ExType {
 	case IKEProtocolExChangeType_IKE_SA_INIT:
 		{
-			return thisPt.ProcessInitPacket(packet, context)
+			if state == IKE_SESSION_STATUS_INIT_SEND || state == IKE_SESSION_STATUS_NEW {
+				return thisPt.processInitPacket(packet, context)
+			}
 		}
 	case IKEProtocolExChangeType_IKE_AUTH:
 		{
-			return thisPt.ProcessAuthPacket(packet, context)
+			if state == IKE_SESSION_STATUS_AUTH_SEND || state == IKE_SESSION_STATUS_INIT_RECEIVE {
+				return thisPt.processAuthPacket(packet, context)
+			}
 		}
 	case IKEProtocolExChangeType_CREATE_CHILD_SA:
 		{
-			return thisPt.ProcessChildSA(packet, context)
+			if state == IKE_SESSION_STATUS_AUTH_DONE {
+				return thisPt.processChildSA(packet, context)
+			}
 		}
 	case IKEProtocolExChangeType_INFORMATIONAL:
 		{
-			return thisPt.ProcessInformation(packet, context)
+			return thisPt.processInformation(packet, context)
 		}
 	}
 
 	return nil, errors.New("invalid IKE packet")
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) decryptPacket(packet IIKEPacket, session IIKESession) (IIKEPacket, error) {
+	if session.IsEncrypted() {
+		enc := thisPt.crypto.GetCipher(session.GetPhase1KeyInfo().Enc, session.GetRemotePhase1Key().SKE)
+		auth := thisPt.crypto.GetAuth(session.GetPhase1KeyInfo().Int, session.GetRemotePhase1Key().SKA)
+		return packet.Decrypt(enc, auth)
+	}
+	return packet, nil
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) serializePacket(packet IIKEPacket, session IIKESession) ([]byte, error) {
+
+	buffer := bytes.NewBuffer(nil)
+
+	//check encryption status
+	if !session.IsEncrypted() || packet.GetHeader().ExType == IKEProtocolExChangeType_IKE_SA_INIT {
+		if err := packet.Serialize(buffer); err != nil {
+			return nil, err
+		}
+	}
+
+	//prepare keys
+	enc := thisPt.crypto.GetCipher(session.GetPhase1KeyInfo().Enc, session.GetRemotePhase1Key().SKE)
+	auth := thisPt.crypto.GetAuth(session.GetPhase1KeyInfo().Int, session.GetRemotePhase1Key().SKA)
+
+	//encrypt
+	if err := packet.Encrypt(buffer, enc, auth); err != nil {
+		return nil, err
+	}
+	return buffer.Bytes(), nil
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) updateSeq(packet IIKEPacket, session IIKESession) {
+	if session.IsInitiator() {
+		packet.SetSequence(IKEProtocolHeaderFlag_Initiator, session.GetExpectedSeq())
+	} else {
+		packet.SetSequence(IKEProtocolHeaderFlag_Response, session.GetExpectedSeq()-1)
+	}
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) Process(in []byte, nat bool, local, remote *net.UDPAddr) ([]byte, error) {
+
+	//create packet
+	packet, err := createIKEPacket(bytes.NewBuffer(in), 0)
+	if err != nil {
+		return nil, err
+	}
+
+	//find session
+	session := thisPt.sessionManager.Find(packet.GetHeader().ISPI[:], packet.GetHeader().RSPI[:])
+	if session == nil {
+		session, err = thisPt.createNewResponderSession(packet, local, remote)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	//lock this session
+	session.Lock()
+	defer session.UnLock()
+
+	//check and update sequence
+	if session.GetExpectedSeq() != packet.GetHeader().Id {
+		return nil, errors.New("out of order packet")
+	}
+	session.AddExpectedSeq()
+
+	//decrypt packet
+	packet, err = thisPt.decryptPacket(packet, session)
+	if err != nil {
+		return nil, err
+	}
+
+	//create context
+	context := createIKEContext(local,
+		remote,
+		nat,
+		&thisPt.ikeProfile,
+		session)
+
+	//it is possible that we have both error and packet
+	var out []byte
+	outP, err := thisPt.processPacket(packet, context)
+
+	if outP != nil {
+		thisPt.updateSeq(packet, session)
+		out, err = thisPt.serializePacket(packet, session)
+	}
+	return out, err
+}
+
+//---------------------------------------------------------------------------------------
+func CreateIKE(actor IIKEActor, profile *IKEProfile) IIKE {
+
+	confSessionMan := ikeSessionManagerConfig{
+		halfOpenSessionsLifeTime: profile.HalfOpenSessionsLifeTime,
+		inactiveSessionsLifeTime: profile.InactiveSessionsLifeTime,
+		removedSessionsLifeTime:  profile.RemovedSessionsLifeTime,
+	}
+
+	st := &ikeStateMachine{
+		actor:          actor,
+		ikeProfile:     *profile,
+		sessionManager: createIKESessionManager(&confSessionMan),
+		packetFactory:  createIKEPacketFactory(),
+		crypto:         gcrypto.CreateCryptoObject(),
+	}
+	return st
 }

@@ -1,6 +1,9 @@
 package ike
 
-const IKE_PROTOCOL_SP_LEN = 8
+const (
+	IKE_PROTOCOL_SP_LEN    = 8
+	IKE_PROTOCOL_NONCE_LEN = 32
+)
 
 //---------------------------------------------------------------------------------------
 const (
@@ -104,26 +107,6 @@ const (
 	IKEProtocolAuthType_RSA = 1
 	IKEProtocolAuthType_PSK = 2
 	IKEProtocolAuthType_DSS = 3
-)
-
-//---------------------------------------------------------------------------------------
-const (
-	IKEProtocolTransformEncALG_ENCR_AES_CBC     = 12
-	IKEProtocolTransformEncALG_ENCR_CAMELIA_CBC = 23
-)
-
-//---------------------------------------------------------------------------------------
-const (
-	IKEProtocolTransformEncALG_HMAC_MD5    = 1
-	IKEProtocolTransformEncALG_HMAC_SHA1   = 2
-	IKEProtocolTransformEncALG_HMAC_SHA256 = 5
-)
-
-//---------------------------------------------------------------------------------------
-const (
-	IKEProtocolAuthFunction_MD5_96       = 1
-	IKEProtocolAuthFunction_SHA1_96      = 2
-	IKEProtocolAuthFunction_SHA2_256_128 = 12
 )
 
 //---------------------------------------------------------------------------------------

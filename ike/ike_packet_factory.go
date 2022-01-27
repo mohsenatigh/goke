@@ -87,3 +87,8 @@ func (thisPT *ikePacketFactory) MakeDeletePacket(info *IKEPacketDeleteInfo) (IIK
 	packet.GetPayloadFactory().CreateDelete(&info.DelInfo)
 	return packet, nil
 }
+
+//---------------------------------------------------------------------------------------
+func createIKEPacketFactory() IIKEPacketFactory {
+	return &ikePacketFactory{}
+}

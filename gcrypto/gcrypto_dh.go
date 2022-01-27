@@ -13,7 +13,7 @@ import (
 
 //---------------------------------------------------------------------------------------
 type cryptoDH struct {
-	group      int
+	group      GCryptoDH
 	privateKey *ecdsa.PrivateKey
 }
 
@@ -36,11 +36,6 @@ func (thisPt *cryptoDH) getCurve() (elliptic.Curve, int) {
 		return brainpool.P512r1(), 64
 	}
 	return nil, 0
-}
-
-//---------------------------------------------------------------------------------------
-func (thisPt *cryptoDH) GetGroup() int {
-	return thisPt.group
 }
 
 //---------------------------------------------------------------------------------------
@@ -103,7 +98,12 @@ func (thisPt *cryptoDH) GetPublicKey() ([]byte, error) {
 }
 
 //---------------------------------------------------------------------------------------
-func createCryptoDH(hType int) IGCryptoDH {
+func (thisPt *cryptoDH) GetGroup() int {
+	return int(thisPt.group)
+}
+
+//---------------------------------------------------------------------------------------
+func createCryptoDH(hType GCryptoDH) IGCryptoDH {
 	h := &cryptoDH{group: hType}
 	if _, err := h.GetPublicKey(); err != nil {
 		return nil

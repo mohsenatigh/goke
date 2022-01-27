@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+
+	"github.com/mohsenatigh/goke/gcrypto"
 )
 
 type ikePacketPayloadDissector struct {
@@ -65,7 +67,7 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 		case IKEProtocolTransformType_ENCR:
 			{
 				var keyLen uint16
-				info.EncryptionAlg = int(transformHeader.TransformID)
+				info.EncryptionAlg = gcrypto.GCryptCipherAlg(transformHeader.TransformID)
 				if err := binary.Read(payload, binary.LittleEndian, &keyLen); err != nil {
 					return err
 				}
@@ -73,15 +75,15 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 			}
 		case IKEProtocolTransformType_PRF:
 			{
-				info.Prf = int(transformHeader.TransformID)
+				info.Prf = gcrypto.GCryptHmacAlg(transformHeader.TransformID)
 			}
 		case IKEProtocolTransformType_INTEG:
 			{
-				info.IntegrityAlg = int(transformHeader.TransformID)
+				info.IntegrityAlg = gcrypto.GCryptAuthAlg(transformHeader.TransformID)
 			}
 		case IKEProtocolTransformType_DH:
 			{
-				info.DH = int(transformHeader.TransformID)
+				info.DH = gcrypto.GCryptoDH(transformHeader.TransformID)
 			}
 		case IKEProtocolTransformType_ESN:
 			{

@@ -1,28 +1,36 @@
 package gcrypto
 
-import "bytes"
+import (
+	"bytes"
+	"crypto/rand"
+)
 
 //---------------------------------------------------------------------------------------
 type cryptoObj struct {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoObj) GetHMAC(hType int, key []byte) IGCryptoHMAC {
+func (thisPt *cryptoObj) GetHMAC(hType GCryptHmacAlg, key []byte) IGCryptoHMAC {
 	return createCryptoHMAC(hType, key)
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoObj) GetHash(hType int) IGCryptoHash {
+func (thisPt *cryptoObj) GetHash(hType GCryptHashAlg) IGCryptoHash {
 	return createCryptoHash(hType)
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoObj) GetCipher(sType int, key []byte) IGCryptoCipher {
+func (thisPt *cryptoObj) GetAuth(hType GCryptAuthAlg, key []byte) IGCryptoAuth {
+	return createCryptoAuth(hType, key)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoObj) GetCipher(sType GCryptCipherAlg, key []byte) IGCryptoCipher {
 	return createCryptoCipher(sType, key)
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoObj) GetDH(group int) IGCryptoDH {
+func (thisPt *cryptoObj) GetDH(group GCryptoDH) IGCryptoDH {
 	return createCryptoDH(group)
 }
 
@@ -60,6 +68,13 @@ func (thisPt *cryptoObj) CalculatePRFPlus(body []byte, hmacObj IGCryptoHMAC) []b
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoObj) CreateCryptoObject() IGCrypto {
+func (thisPt *cryptoObj) GenerateRandom(len int) []byte {
+	rBuf := make([]byte, len)
+	rand.Read(rBuf)
+	return rBuf
+}
+
+//---------------------------------------------------------------------------------------
+func CreateCryptoObject() IGCrypto {
 	return &cryptoObj{}
 }
