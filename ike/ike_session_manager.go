@@ -1,6 +1,7 @@
 package ike
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"sync"
@@ -21,6 +22,14 @@ type ikeSessionManager struct {
 	sessions   map[uint64]*ikeSession
 	accessLock sync.RWMutex
 	config     ikeSessionManagerConfig
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeSessionManager) checkSPI(ispi []byte, rspi []byte) error {
+	if len(ispi) != 8 || (rspi != nil && len(rspi) != 8) {
+		return errors.New("invalid spi")
+	}
+	return nil
 }
 
 //---------------------------------------------------------------------------------------
@@ -52,16 +61,27 @@ func (thisPt *ikeSessionManager) createRemoveList(cTime int64) []uint64 {
 
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeSessionManager) getSessionKey(spi []byte, spr []byte) uint64 {
-	k1, _ := binary.Uvarint(spi[0:8])
-	k2 := uint64(0)
+	var k1 uint64
+	var k2 uint64
+	binary.Read(bytes.NewBuffer(spi), binary.LittleEndian, &k1)
 	if spr != nil {
-		k2, _ = binary.Uvarint(spr[0:8])
+		binary.Read(bytes.NewBuffer(spr), binary.LittleEndian, &k2)
 	}
 	return (k1 ^ k2)
 }
 
 //---------------------------------------------------------------------------------------
+func (thisPt *ikeSessionManager) GetSessionsCount() int {
+	return len(thisPt.sessions)
+}
+
+//---------------------------------------------------------------------------------------
 func (thisPt *ikeSessionManager) Find(spi []byte, spr []byte) IIKESession {
+
+	if err := thisPt.checkSPI(spi, spr); err != nil {
+		return nil
+	}
+
 	thisPt.accessLock.RLock()
 	defer thisPt.accessLock.RUnlock()
 
@@ -77,6 +97,13 @@ func (thisPt *ikeSessionManager) Find(spi []byte, spr []byte) IIKESession {
 
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeSessionManager) New(initiator bool, ispi []byte, rspi []byte) (IIKESession, error) {
+
+	//
+	if err := thisPt.checkSPI(ispi, rspi); err != nil {
+		return nil, err
+	}
+
+	//
 	thisPt.accessLock.Lock()
 	defer thisPt.accessLock.Unlock()
 
@@ -95,7 +122,7 @@ func (thisPt *ikeSessionManager) New(initiator bool, ispi []byte, rspi []byte) (
 	}
 	session := createIKESession(&params)
 	thisPt.sessions[key] = session
-	return nil, nil
+	return session, nil
 }
 
 //---------------------------------------------------------------------------------------
@@ -112,10 +139,11 @@ func (thisPt *ikeSessionManager) Timer(cTime int64) int {
 
 	//remove items
 	thisPt.accessLock.Lock()
+	defer thisPt.accessLock.Unlock()
+
 	for _, k := range list {
 		delete(thisPt.sessions, k)
 	}
-	thisPt.accessLock.Unlock()
 	return len(list)
 }
 

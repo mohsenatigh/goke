@@ -9,6 +9,11 @@ import (
 
 //---------------------------------------------------------------------------------------
 const (
+	IKE_VERSION = "v1.0.0.0"
+)
+
+//---------------------------------------------------------------------------------------
+const (
 	IKEProtocolProposalHeaderID_IKE = 1
 	IKEProtocolProposalHeaderID_AH  = 2
 	IKEProtocolProposalHeaderID_ESP = 3
@@ -356,6 +361,7 @@ type IIKESessionManager interface {
 	Find(spi []byte, spr []byte) IIKESession
 	New(initiator bool, spi []byte, spr []byte) (IIKESession, error)
 	Timer(cTime int64) int
+	GetSessionsCount() int
 }
 
 //---------------------------------------------------------------------------------------

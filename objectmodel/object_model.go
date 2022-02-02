@@ -1,4 +1,4 @@
-package ikeobjectmodel
+package objectmodel
 
 import (
 	"errors"
@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mohsenatigh/goke/gcrypto"
 	"gopkg.in/go-playground/validator.v8"
 )
 
@@ -34,7 +35,7 @@ func parsePortRange(in string) (int, int, error) {
 }
 
 //---------------------------------------------------------------------------------------
-func ValidateStruct(input interface{}) error {
+func ValidateObject(input interface{}) error {
 
 	//translate error
 	translateError := func(err error) error {
@@ -60,26 +61,6 @@ func ValidateStruct(input interface{}) error {
 			return errors.New(errString)
 		}
 		return nil
-	}
-
-	//routes validator
-	checkRoutes := func(v *validator.Validate, topStruct reflect.Value, currentStruct reflect.Value, field reflect.Value, fieldtype reflect.Type, fieldKind reflect.Kind, param string) bool {
-		const maxRoutes = 256
-		list, valid := field.Interface().([]string)
-		if !valid {
-			return false
-		}
-
-		if len(list) > maxRoutes {
-			return false
-		}
-
-		for _, ipVal := range list {
-			if _, _, err := net.ParseCIDR(ipVal); err != nil {
-				return false
-			}
-		}
-		return true
 	}
 
 	//IP list validator
@@ -121,11 +102,10 @@ func ValidateStruct(input interface{}) error {
 			return false
 		}
 
-		if len(sIp) != len(dIp) {
-			return false
-		}
+		sV4 := (sIp.To4() == nil)
+		dV4 := (dIp.To4() == nil)
 
-		return true
+		return sV4 == dV4
 	}
 
 	//name validation
@@ -180,20 +160,7 @@ func ValidateStruct(input interface{}) error {
 		return true
 	}
 
-	//action validation
-	action := func(v *validator.Validate, topStruct reflect.Value, currentStruct reflect.Value, field reflect.Value, fieldtype reflect.Type, fieldKind reflect.Kind, param string) bool {
-		actionString, valid := field.Interface().(string)
-		if !valid {
-			return false
-		}
-
-		if actionString != "drop" && actionString != "accept" {
-			return true
-		}
-		return true
-	}
-
-	//action validation
+	//fileName validation
 	fileName := func(v *validator.Validate, topStruct reflect.Value, currentStruct reflect.Value, field reflect.Value, fieldtype reflect.Type, fieldKind reflect.Kind, param string) bool {
 		fileNameStr, valid := field.Interface().(string)
 		if !valid {
@@ -208,20 +175,37 @@ func ValidateStruct(input interface{}) error {
 
 	//ike algorithm validator
 	algorithm := func(v *validator.Validate, topStruct reflect.Value, currentStruct reflect.Value, field reflect.Value, fieldtype reflect.Type, fieldKind reflect.Kind, param string) bool {
+		alg, valid := field.Interface().(string)
+		if !valid {
+			return false
+		}
+		if _, err := gcrypto.ParseAlgorithm(alg); err != nil {
+			return false
+		}
+
+		return true
+	}
+
+	//port address validator
+	portAddress := func(v *validator.Validate, topStruct reflect.Value, currentStruct reflect.Value, field reflect.Value, fieldtype reflect.Type, fieldKind reflect.Kind, param string) bool {
+		portVal, valid := field.Interface().(int)
+		if !valid || portVal < 1 || portVal > 0xffff {
+			return false
+		}
+
 		return true
 	}
 
 	//validate
 	config := &validator.Config{TagName: "validate"}
 	validate := validator.New(config)
-	validate.RegisterValidation("routes", checkRoutes)
 	validate.RegisterValidation("iplist", addressListValidator)
 	validate.RegisterValidation("iprange", ipRangeValidator)
+	validate.RegisterValidation("port", portAddress)
 	validate.RegisterValidation("name", isValidName)
 	validate.RegisterValidation("time", isValidTime)
 	validate.RegisterValidation("day", isValidDay)
 	validate.RegisterValidation("port_range", portRange)
-	validate.RegisterValidation("action", action)
 	validate.RegisterValidation("file", fileName)
 	validate.RegisterValidation("algorithm", algorithm)
 

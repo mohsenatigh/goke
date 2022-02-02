@@ -8,7 +8,6 @@ import (
 	"crypto/sha512"
 	"errors"
 	"hash"
-	"log"
 )
 
 type cryptoHmac struct {
@@ -52,8 +51,7 @@ func (thisPt *cryptoHmac) Write(buffer []byte) error {
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoHmac) Final() []byte {
-	out := make([]byte, 64)
-	return thisPt.hmac.Sum(out)
+	return thisPt.hmac.Sum(nil)
 }
 
 //---------------------------------------------------------------------------------------
@@ -69,12 +67,7 @@ func (thisPt *cryptoHmac) GetHMAC(buffer []byte) ([]byte, error) {
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoHmac) GetLen() int {
-	fnc := thisPt.getHashFunc()
-	if fnc == nil {
-		log.Printf("invalid HMAC function \n")
-		return 0
-	}
-	return fnc().Size()
+	return thisPt.hmac.Size()
 }
 
 //---------------------------------------------------------------------------------------

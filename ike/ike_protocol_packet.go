@@ -53,10 +53,10 @@ func (thisPt *ikeProtocolPacket) serializeBody(w io.Writer) error {
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeProtocolPacket) loadPayload(r io.Reader) error {
 	pType := thisPt.header.NPayload
-	for {
+	for pType != 0 {
 		payload, err := IKEProtocolReadPayload(int(pType), r)
 		if err != nil {
-			break
+			return err
 		}
 		pType = payload.GetHeader().NextPayload
 		thisPt.payloads = append(thisPt.payloads, payload)
@@ -71,7 +71,7 @@ func (thisPt *ikeProtocolPacket) Load(r io.Reader) error {
 	thisPt.payloads = []IIKEPayload{}
 
 	//read header
-	if err := binary.Read(r, binary.LittleEndian, &thisPt.header); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &thisPt.header); err != nil {
 		return err
 	}
 
@@ -90,9 +90,15 @@ func (thisPt *ikeProtocolPacket) GetHeader() *IKEProtocolHeader {
 
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeProtocolPacket) GetPayload(code int, index int) IIKEPayload {
-	for i, p := range thisPt.payloads {
-		if p.GetType() == code && i == index {
-			return p
+	pIndex := 0
+	for _, p := range thisPt.payloads {
+		if p.GetType() == code {
+			if pIndex == index {
+				p.Seek(0)
+				return p
+			} else {
+				pIndex++
+			}
 		}
 	}
 	return nil
@@ -103,7 +109,7 @@ func (thisPt *ikeProtocolPacket) HasError() (bool, int) {
 	for _, p := range thisPt.payloads {
 		if p.GetType() == IKEProtocolPayloadType_N {
 			header := IKEProtocolNotifyStaticHeader{}
-			if err := binary.Read(p, binary.LittleEndian, &header); err != nil {
+			if err := binary.Read(p, binary.BigEndian, &header); err != nil {
 				return true, -1
 			}
 
@@ -152,7 +158,7 @@ func (thisPt *ikeProtocolPacket) Serialize(w io.Writer) error {
 	}
 
 	//write header
-	if err := binary.Write(w, binary.LittleEndian, &thisPt.header); err != nil {
+	if err := binary.Write(w, binary.BigEndian, &thisPt.header); err != nil {
 		return err
 	}
 
@@ -174,7 +180,7 @@ func (thisPt *ikeProtocolPacket) checkHMAC(payload IIKEPayload, auth gcrypto.IGC
 
 	//serialize herader
 	hBuffer := bytes.NewBuffer(nil)
-	if err := binary.Write(hBuffer, binary.LittleEndian, &thisPt.header); err != nil {
+	if err := binary.Write(hBuffer, binary.BigEndian, &thisPt.header); err != nil {
 		return false
 	}
 
@@ -282,7 +288,7 @@ func (thisPt *ikeProtocolPacket) Encrypt(w io.Writer, encrypt gcrypto.IGCryptoCi
 	eHeader.Length += uint32(len(iv))
 	eHeader.Length += uint32(len(encBuffer))
 	eHeader.Length += uint32(auth.GetLen())
-	if err := binary.Write(payloadBuffer, binary.LittleEndian, &eHeader); err != nil {
+	if err := binary.Write(payloadBuffer, binary.BigEndian, &eHeader); err != nil {
 		return err
 	}
 
@@ -290,7 +296,7 @@ func (thisPt *ikeProtocolPacket) Encrypt(w io.Writer, encrypt gcrypto.IGCryptoCi
 	epHeader := IKEProtocolPayloadHeader{}
 	epHeader.PayloadLen = uint16(eHeader.Length - IKEProtocolHeaderSize)
 	epHeader.NextPayload = uint8(thisPt.payloads[0].GetType())
-	if err := binary.Write(payloadBuffer, binary.LittleEndian, &epHeader); err != nil {
+	if err := binary.Write(payloadBuffer, binary.BigEndian, &epHeader); err != nil {
 		return err
 	}
 

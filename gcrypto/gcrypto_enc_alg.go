@@ -57,10 +57,10 @@ func (alg GCryptCipherAlg) Validate(keySize int) bool {
 	}
 	for _, kl := range info.keySizeList {
 		if kl == keySize {
-			return false
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 //---------------------------------------------------------------------------------------

@@ -8,7 +8,6 @@ const (
 	IANA_DH_GROUP_INVALID GCryptoDH = 0
 	IANA_DH_GROUP_19      GCryptoDH = 19
 	IANA_DH_GROUP_20      GCryptoDH = 20
-	IANA_DH_GROUP_21      GCryptoDH = 21
 	IANA_DH_GROUP_27      GCryptoDH = 27
 	IANA_DH_GROUP_28      GCryptoDH = 28
 	IANA_DH_GROUP_29      GCryptoDH = 29
@@ -24,13 +23,12 @@ type gCryptoSHAlgInfo struct {
 //---------------------------------------------------------------------------------------
 //I Love Sara :)
 var gCryptoDHList = map[GCryptoDH]gCryptoSHAlgInfo{
-	IANA_DH_GROUP_19: {alg: IANA_DH_GROUP_19, name: "dh_group_19"},
-	IANA_DH_GROUP_20: {alg: IANA_DH_GROUP_20, name: "dh_group_20"},
-	IANA_DH_GROUP_21: {alg: IANA_DH_GROUP_21, name: "dh_group_21"},
-	IANA_DH_GROUP_27: {alg: IANA_DH_GROUP_27, name: "dh_group_27"},
-	IANA_DH_GROUP_28: {alg: IANA_DH_GROUP_28, name: "dh_group_28"},
-	IANA_DH_GROUP_29: {alg: IANA_DH_GROUP_29, name: "dh_group_29"},
-	IANA_DH_GROUP_30: {alg: IANA_DH_GROUP_30, name: "dh_group_30"},
+	IANA_DH_GROUP_19: {alg: IANA_DH_GROUP_19, name: "group19"},
+	IANA_DH_GROUP_20: {alg: IANA_DH_GROUP_20, name: "group20"},
+	IANA_DH_GROUP_27: {alg: IANA_DH_GROUP_27, name: "group27"},
+	IANA_DH_GROUP_28: {alg: IANA_DH_GROUP_28, name: "group28"},
+	IANA_DH_GROUP_29: {alg: IANA_DH_GROUP_29, name: "group29"},
+	IANA_DH_GROUP_30: {alg: IANA_DH_GROUP_30, name: "group30"},
 }
 
 //---------------------------------------------------------------------------------------

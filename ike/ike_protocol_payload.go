@@ -70,7 +70,7 @@ func (thisPt *ikeProtocolPayload) Write(p []byte) (n int, err error) {
 //---------------------------------------------------------------------------------------
 func (thisPt *ikeProtocolPayload) Serialize(w io.Writer) error {
 
-	if err := binary.Write(w, binary.LittleEndian, &thisPt.header); err != nil {
+	if err := binary.Write(w, binary.BigEndian, &thisPt.header); err != nil {
 		return err
 	}
 
@@ -86,7 +86,7 @@ func IKEProtocolReadPayload(pType int, r io.Reader) (IIKEPayload, error) {
 	p := &ikeProtocolPayload{pType: pType}
 
 	//read header
-	if err := binary.Read(r, binary.LittleEndian, &p.header); err != nil {
+	if err := binary.Read(r, binary.BigEndian, &p.header); err != nil {
 		return nil, err
 	}
 
@@ -95,8 +95,10 @@ func IKEProtocolReadPayload(pType int, r io.Reader) (IIKEPayload, error) {
 		return nil, errors.New("header reserved space is non-zero")
 	}
 
-	p.data = make([]byte, p.header.PayloadLen)
-	if len, _ := r.Read(p.data); len != int(p.header.PayloadLen) {
+	//read payload
+	payloadLen := int(p.header.PayloadLen - 4)
+	p.data = make([]byte, payloadLen)
+	if len, _ := r.Read(p.data); len != payloadLen {
 		return nil, errors.New("invalid data length")
 	}
 

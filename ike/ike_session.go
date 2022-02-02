@@ -1,6 +1,7 @@
 package ike
 
 import (
+	"bytes"
 	"net"
 	"sync"
 	"time"
@@ -57,12 +58,13 @@ func (thisPT *ikeSession) Remove() {
 
 //---------------------------------------------------------------------------------------
 func (thisPT *ikeSession) IsActive() bool {
-	return thisPT.removed
+	return !thisPT.removed
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPT *ikeSession) IsHalfOpen() bool {
-	return thisPT.initParams.rSpi == nil
+	return thisPT.initParams.rSpi == nil ||
+		(bytes.Equal(thisPT.initParams.rSpi, []byte{0, 0, 0, 0, 0, 0, 0, 0}))
 }
 
 //---------------------------------------------------------------------------------------
@@ -245,6 +247,7 @@ func (thisPT *ikeSession) AddExpectedSeq() {
 func createIKESession(params *ikeSessionInitParameters) *ikeSession {
 	session := &ikeSession{
 		initParams:   *params,
+		state:        IKE_SESSION_STATUS_NEW,
 		creationTime: time.Now().Unix(),
 		accessTime:   time.Now().Unix(),
 	}

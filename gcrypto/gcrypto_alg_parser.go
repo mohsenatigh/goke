@@ -15,13 +15,24 @@ func GetDefaultESPAlgorithmString() string {
 
 //---------------------------------------------------------------------------------------
 func GetDefaultIKEAlgorithmString() string {
-	return "enc:aes-128,auth:hmac_sha2_256_128,prf:hmac_sha2_256,dh:group20"
+	return "enc:aes-128,auth:hmac_sha2_256_128,prf:hmac_sha2_256,dh:group27"
 }
 
 //---------------------------------------------------------------------------------------
 func ParseAlgorithm(in string) (GCryptoParseResult, error) {
-	out := GCryptoParseResult{}
+	out := GCryptoParseResult{
+		DhGroup:   IANA_DH_GROUP_27,
+		EncAlg:    IANA_ENCR_AES_CBC,
+		IntAlg:    IANA_AUTH_HMAC_SHA1_96,
+		Prf:       IANA_PRF_HMAC_SHA1,
+		EncKeyLen: 16,
+	}
+
 	items := strings.Split(in, ",")
+
+	if len(items) < 2 {
+		return out, errors.New("invalid algorithm string")
+	}
 
 	//parse values
 	for _, item := range items {
@@ -31,25 +42,18 @@ func ParseAlgorithm(in string) (GCryptoParseResult, error) {
 			return out, errors.New("invalid algorithm string")
 		}
 
-		//initialize default values
-		out.DhGroup = IANA_DH_GROUP_20
-		out.EncAlg = IANA_ENCR_AES_CBC
-		out.IntAlg = IANA_AUTH_HMAC_SHA1_96
-		out.Prf = IANA_PRF_HMAC_SHA1
-		out.EncKeyLen = 16
-
 		//
 		switch pair[0] {
 		case "enc": //parse encryption
 			{
-				encInfo := strings.Split(item, "-")
+				encInfo := strings.Split(pair[1], "-")
 				if len(encInfo) != 2 {
 					return out, errors.New("invalid encryption algorithm")
 				}
 
 				out.EncKeyLen, _ = strconv.Atoi(encInfo[1])
 				out.EncKeyLen /= 8
-				if out.EncAlg = out.EncAlg.FromString(pair[1]); out.EncAlg == IANA_ENCR_INVALID {
+				if out.EncAlg = out.EncAlg.FromString(encInfo[0]); out.EncAlg == IANA_ENCR_INVALID {
 					return out, errors.New("invalid encryption algorithm")
 				}
 

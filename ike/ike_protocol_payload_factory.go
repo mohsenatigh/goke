@@ -18,7 +18,7 @@ func (thisPt *ikePayloadFactory) createIdPayload(pType int, info *IKEPayloadIDIn
 	header := IKEProtocolIDHeader{}
 	header.IDType = info.IDType
 	payload := thisPt.packet.CreatePayload(pType)
-	binary.Write(payload, binary.LittleEndian, &header)
+	binary.Write(payload, binary.BigEndian, &header)
 	payload.Write(info.IDData)
 	return payload, nil
 }
@@ -36,7 +36,7 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 			TransformID:   id,
 			TransformType: tType,
 			Reserved:      0}
-		binary.Write(payload, binary.LittleEndian, &transformHeader)
+		binary.Write(payload, binary.BigEndian, &transformHeader)
 
 		//for enc-key  add key attributes
 		if tType == IKEProtocolTransformType_ENCR {
@@ -44,7 +44,7 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 				KeyLen: keyLen,
 				Type:   0x800e,
 			}
-			binary.Write(payload, binary.LittleEndian, &keyInfo)
+			binary.Write(payload, binary.BigEndian, &keyInfo)
 		}
 
 		//create payload
@@ -63,7 +63,7 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 			ID:        id,
 			SPISize:   0,
 		}
-		binary.Write(payload, binary.LittleEndian, &pHeader)
+		binary.Write(payload, binary.BigEndian, &pHeader)
 
 		//create enc transform
 		payload.Write(createTransformPayload(
@@ -117,7 +117,7 @@ func (thisPt *ikePayloadFactory) CreateNotify(protocolId uint8, code uint16, dat
 		NotifyMessageType: code,
 	}
 	payload := thisPt.packet.CreatePayload(IKEProtocolPayloadType_N)
-	binary.Write(payload, binary.LittleEndian, &header)
+	binary.Write(payload, binary.BigEndian, &header)
 	if data != nil {
 		payload.Write(data)
 	}
@@ -177,7 +177,7 @@ func (thisPt *ikePayloadFactory) CreateConfigurationReply(v4 *IKEPayloadConfigur
 		header := IKEProtocolConfigurationAttributeHeader{}
 		header.AttType = attType
 		header.Length = uint16(len(ip))
-		binary.Write(w, binary.LittleEndian, &header)
+		binary.Write(w, binary.BigEndian, &header)
 	}
 
 	if v4.HaveIp {
@@ -223,7 +223,7 @@ func (thisPt *ikePayloadFactory) CreateDH(dh gcrypto.IGCryptoDH) (IIKEPayload, e
 	header.Res = 0
 
 	payload := thisPt.packet.CreatePayload(IKEProtocolPayloadType_KE)
-	binary.Write(payload, binary.LittleEndian, &header)
+	binary.Write(payload, binary.BigEndian, &header)
 
 	pKey, err := dh.GetPublicKey()
 	if err != nil {
@@ -281,7 +281,7 @@ func (thisPt *ikePayloadFactory) CreateTrafficSelector(info *IKEPayloadTrafficSe
 	//write header
 	header := IKEProtocolTrafficSelectorHeader{}
 	header.TSCount = uint8(len(info.TrafficPolicy))
-	binary.Write(payload, binary.LittleEndian, &header)
+	binary.Write(payload, binary.BigEndian, &header)
 
 	//write selectors
 	for _, ts := range info.TrafficPolicy {
@@ -298,7 +298,7 @@ func (thisPt *ikePayloadFactory) CreateTrafficSelector(info *IKEPayloadTrafficSe
 		}
 
 		//write selector header
-		binary.Write(payload, binary.LittleEndian, &header)
+		binary.Write(payload, binary.BigEndian, &header)
 
 		//write IP addressess
 		payload.Write(ts.StartAddress)
@@ -348,7 +348,7 @@ func (thisPt *ikePayloadFactory) CreateAuth(info *IKEPayloadAuthInfo) (IIKEPaylo
 	payload := thisPt.packet.CreatePayload(IKEProtocolPayloadType_AUTH)
 	staticHeader := IKEProtocolAuthPayloadHeader{}
 	staticHeader.AuthenticationType = info.AuthType
-	binary.Write(payload, binary.LittleEndian, &staticHeader)
+	binary.Write(payload, binary.BigEndian, &staticHeader)
 
 	//write body
 	payload.Write(body)
@@ -367,7 +367,7 @@ func (thisPt *ikePayloadFactory) CreateDelete(info *IKEPayloadDeleteInfo) (IIKEP
 		header.NumSPI = uint16(len(info.SPIList))
 		header.SPISize = uint8(len(info.SPIList[0]))
 	}
-	binary.Write(payload, binary.LittleEndian, &header)
+	binary.Write(payload, binary.BigEndian, &header)
 
 	if info.SPIList != nil {
 		for i := range info.SPIList {

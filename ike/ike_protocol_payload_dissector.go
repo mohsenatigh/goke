@@ -22,7 +22,7 @@ func (thisPt *ikePacketPayloadDissector) readID(code int) (IKEPayloadIDInfo, err
 
 	//read header
 	ikeHeader := IKEProtocolIDHeader{}
-	if err := binary.Read(payload, binary.LittleEndian, &ikeHeader); err != nil {
+	if err := binary.Read(payload, binary.BigEndian, &ikeHeader); err != nil {
 		return info, err
 	}
 
@@ -43,7 +43,7 @@ func (thisPt *ikePacketPayloadDissector) haveNotify(code int) IIKEPayload {
 			break
 		}
 		nHeader := IKEProtocolNotifyStaticHeader{}
-		if err := binary.Read(payload, binary.LittleEndian, &nHeader); err != nil {
+		if err := binary.Read(payload, binary.BigEndian, &nHeader); err != nil {
 			continue
 		}
 		if nHeader.NotifyMessageType == uint16(code) {
@@ -59,19 +59,26 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 
 	readTransform := func(payload IIKEPayload, info *IKEPayloadProposalInfo) error {
 		transformHeader := IKEProtocolProposalTransformHeader{}
-		if err := binary.Read(payload, binary.LittleEndian, &transformHeader); err != nil {
+
+		//read transform payload
+		tPayload, err := IKEProtocolReadPayload(payload.GetType(), payload)
+		if err != nil {
+			return err
+		}
+
+		if err := binary.Read(tPayload, binary.BigEndian, &transformHeader); err != nil {
 			return err
 		}
 
 		switch transformHeader.TransformType {
 		case IKEProtocolTransformType_ENCR:
 			{
-				var keyLen uint16
+				keyInfo := IKEProtocolProposalTransformKeyInfo{}
 				info.EncryptionAlg = gcrypto.GCryptCipherAlg(transformHeader.TransformID)
-				if err := binary.Read(payload, binary.LittleEndian, &keyLen); err != nil {
+				if err := binary.Read(tPayload, binary.BigEndian, &keyInfo); err != nil {
 					return err
 				}
-				info.EncryptionAlgKeyLen = int(keyLen)
+				info.EncryptionAlgKeyLen = int(keyInfo.KeyLen) / 8
 			}
 		case IKEProtocolTransformType_PRF:
 			{
@@ -98,12 +105,21 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 		info := IKEPayloadProposalInfo{}
 		proposalHeader := IKEProtocolProposalHeader{}
 
-		if err := binary.Read(payload, binary.LittleEndian, &proposalHeader); err != nil {
+		//read saPayload
+		saPayload, err := IKEProtocolReadPayload(payload.GetType(), payload)
+		if err != nil {
 			break
 		}
 
+		if err := binary.Read(saPayload, binary.BigEndian, &proposalHeader); err != nil {
+			break
+		}
+
+		//read proposals
+		info.Protocol = int(proposalHeader.ID)
+
 		for i := 0; i < int(proposalHeader.Transform); i++ {
-			if err := readTransform(payload, &info); err != nil {
+			if err := readTransform(saPayload, &info); err != nil {
 				return nil, err
 			}
 		}
@@ -189,7 +205,7 @@ func (thisPt *ikePacketPayloadDissector) GetPhase1Proposal() ([]IKEPayloadPropos
 
 //---------------------------------------------------------------------------------------
 func (thisPt *ikePacketPayloadDissector) GetNonce() ([]byte, error) {
-	payload := thisPt.packet.GetPayload(IKEProtocolPayloadType_V, 0)
+	payload := thisPt.packet.GetPayload(IKEProtocolPayloadType_NIR, 0)
 	if payload == nil {
 		return nil, errors.New("can not find nonce payload")
 	}
@@ -206,7 +222,7 @@ func (thisPt *ikePacketPayloadDissector) GetDH() ([]byte, int, error) {
 
 	//read header
 	header := IKEProtocolDHKeyHeader{}
-	if err := binary.Read(payload, binary.LittleEndian, &header); err != nil {
+	if err := binary.Read(payload, binary.BigEndian, &header); err != nil {
 		return nil, 0, err
 	}
 
@@ -276,7 +292,7 @@ func (thisPt *ikePacketPayloadDissector) GetTrafficSelector(initiator bool) (IKE
 		//read static header
 		policy := IKEPayloadTrafficPolicy{}
 		header := IKEProtocolTrafficSelectorItemStaticHeader{}
-		if err := binary.Read(payload, binary.LittleEndian, &header); err != nil {
+		if err := binary.Read(payload, binary.BigEndian, &header); err != nil {
 			break
 		}
 
@@ -317,7 +333,7 @@ func (thisPt *ikePacketPayloadDissector) ValidateAuth(info *IKEPayloadAuthInfo) 
 
 	//read header
 	authStaticHeader := IKEProtocolAuthPayloadHeader{}
-	if err := binary.Read(payload, binary.LittleEndian, &authStaticHeader); err != nil {
+	if err := binary.Read(payload, binary.BigEndian, &authStaticHeader); err != nil {
 		return err
 	}
 
@@ -379,7 +395,7 @@ func (thisPt *ikePacketPayloadDissector) GetDelete() (IKEPayloadDeleteInfo, erro
 
 	//read header
 	header := IKEProtocolDeleteHeader{}
-	if err := binary.Read(payload, binary.LittleEndian, &header); err != nil {
+	if err := binary.Read(payload, binary.BigEndian, &header); err != nil {
 		return delInfo, err
 	}
 

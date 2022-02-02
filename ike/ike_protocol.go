@@ -1,7 +1,6 @@
 package ike
 
 const (
-	IKE_PROTOCOL_SP_LEN    = 8
 	IKE_PROTOCOL_NONCE_LEN = 32
 )
 
@@ -149,8 +148,8 @@ const IKEProtocolHeaderSize = 28
 const IKEProtocolPayloadHeaderSize = 4
 
 type IKEProtocolHeader struct {
-	ISPI     [IKE_PROTOCOL_SP_LEN]uint8
-	RSPI     [IKE_PROTOCOL_SP_LEN]uint8
+	ISPI     [8]uint8
+	RSPI     [8]uint8
 	NPayload uint8
 	Version  uint8
 	ExType   uint8

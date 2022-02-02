@@ -30,7 +30,7 @@ func (thisPt *ikeStateMachine) serializeID(id *IKEPayloadIDInfo) []byte {
 	buffer := bytes.NewBuffer(nil)
 	header := IKEProtocolIDHeader{}
 	header.IDType = id.IDType
-	binary.Write(buffer, binary.LittleEndian, &header)
+	binary.Write(buffer, binary.BigEndian, &header)
 	buffer.Write(id.IDData)
 	return buffer.Bytes()
 }
@@ -496,7 +496,7 @@ func (thisPt *ikeStateMachine) processInitPacket(packet IIKEPacket, context IIKE
 	}
 
 	//check for match
-	if prop := context.GetProfile().Phase2Proposal; prop != nil {
+	if prop := context.GetProfile().Phase1Proposal; prop != nil {
 		phase1Proposal = thisPt.haveProposal(prop, otherProposal, true)
 	} else {
 		phase1Proposal = thisPt.getBestProposal(otherProposal, true)
@@ -728,7 +728,7 @@ func (thisPt *ikeStateMachine) createNewResponderSession(packet IIKEPacket, loca
 	}
 
 	//generate responder SPI
-	rspi := thisPt.crypto.GenerateRandom(IKE_PROTOCOL_SP_LEN)
+	rspi := thisPt.crypto.GenerateRandom(8)
 	session, err := thisPt.sessionManager.New(false, packet.GetHeader().ISPI[:], rspi)
 	if err != nil {
 		return nil, err
@@ -794,6 +794,7 @@ func (thisPt *ikeStateMachine) serializePacket(packet IIKEPacket, session IIKESe
 		if err := packet.Serialize(buffer); err != nil {
 			return nil, err
 		}
+		return buffer.Bytes(), nil
 	}
 
 	//prepare keys
