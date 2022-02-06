@@ -14,6 +14,7 @@ func TestIKEPacketFactoryInitPacket(t *testing.T) {
 	ipi := []byte{192, 168, 1, 1}
 	ipr := []byte{192, 168, 1, 2}
 
+	//packet info
 	info := IKEPacketInitInfo{
 		Phase1Proposal: []IKEPayloadProposalInfo{
 			{
@@ -33,7 +34,6 @@ func TestIKEPacketFactoryInitPacket(t *testing.T) {
 			SPR:  rSpi,
 			IPI:  ipi,
 			IPR:  ipr,
-			Src:  true,
 			Hash: gcrypto.CreateCryptoObject().GetHash(gcrypto.IANA_HASH_SHA1),
 		},
 		NatInfoR: IKEPayloadNatInfo{
@@ -41,7 +41,6 @@ func TestIKEPacketFactoryInitPacket(t *testing.T) {
 			SPR:  iSpi,
 			IPI:  ipr,
 			IPR:  ipi,
-			Src:  true,
 			Hash: gcrypto.CreateCryptoObject().GetHash(gcrypto.IANA_HASH_SHA1),
 		},
 		EnableFragment:  true,
@@ -61,7 +60,7 @@ func TestIKEPacketFactoryInitPacket(t *testing.T) {
 	}
 
 	//test packet
-	packet, err = createIKEPacket(data, 0)
+	packet, err = createIKEPacket(data, 0, 0, 0)
 	if err != nil {
 		t.FailNow()
 	}
@@ -81,6 +80,19 @@ func TestIKEPacketFactoryInitPacket(t *testing.T) {
 		phase1[0].EncryptionAlg != gcrypto.IANA_ENCR_AES_CBC ||
 		phase1[0].EncryptionAlgKeyLen != 16 ||
 		phase1[0].IntegrityAlg != gcrypto.IANA_AUTH_HMAC_SHA1_96 {
+		t.FailNow()
+	}
+
+	//read vendor info
+	if _, err := packet.GetPayloadDissector().GetVendorInfo(); err != nil {
+		t.FailNow()
+	}
+
+	if _, err := packet.GetPayloadDissector().GetNAT(true); err != nil {
+		t.FailNow()
+	}
+
+	if _, err := packet.GetPayloadDissector().GetNAT(false); err != nil {
 		t.FailNow()
 	}
 

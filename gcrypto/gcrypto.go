@@ -16,7 +16,6 @@ type IGCryptoCipher interface {
 	Decrypt(in []byte, out []byte, iv []byte) error
 	GetKeyLen() int
 	GetPadLen(bufferSize int) int
-	GetIV() []byte
 	SetKey([]byte)
 	GetAlg() GCryptCipherAlg
 }

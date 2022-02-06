@@ -82,7 +82,7 @@ func (thisPt *ikeProtocolPayload) Serialize(w io.Writer) error {
 }
 
 //---------------------------------------------------------------------------------------
-func IKEProtocolReadPayload(pType int, r io.Reader) (IIKEPayload, error) {
+func readProtocolPayload(pType int, r io.Reader) (IIKEPayload, error) {
 	p := &ikeProtocolPayload{pType: pType}
 
 	//read header

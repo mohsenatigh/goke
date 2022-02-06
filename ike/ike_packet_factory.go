@@ -4,16 +4,29 @@ type ikePacketFactory struct {
 }
 
 //---------------------------------------------------------------------------------------
+func (thisPT *ikePacketFactory) setGeneralInfo(packet IIKEPacket, gInfo *IKEPacketGeneralInfo) {
+	//
+	if gInfo.Initiator {
+		packet.GetHeader().Flags |= IKEProtocolHeaderFlag_Initiator
+	} else {
+		packet.GetHeader().Flags |= IKEProtocolHeaderFlag_Response
+	}
+
+	copy(packet.GetHeader().ISPI[:], gInfo.ISPI)
+	copy(packet.GetHeader().RSPI[:], gInfo.RSPI)
+}
+
+//---------------------------------------------------------------------------------------
 func (thisPT *ikePacketFactory) MakeInit(info *IKEPacketInitInfo) (IIKEPacket, error) {
-	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_IKE_SA_INIT)
+	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_IKE_SA_INIT, 0, 0)
 	packet.GetPayloadFactory().CreatePhase1Proposal(info.Phase1Proposal)
 	packet.GetPayloadFactory().CreateDH(info.DhInfo)
 	packet.GetPayloadFactory().CreateNonce(info.Nonce)
 	packet.GetPayloadFactory().CreateVendorInfo(info.VendorInfo)
 
 	if info.EnableNat {
-		packet.GetPayloadFactory().CreateNAT(&info.NatInfoI)
-		packet.GetPayloadFactory().CreateNAT(&info.NatInfoR)
+		packet.GetPayloadFactory().CreateNAT(&info.NatInfoI, true)
+		packet.GetPayloadFactory().CreateNAT(&info.NatInfoR, false)
 	}
 
 	if info.EnableFragment {
@@ -28,29 +41,32 @@ func (thisPT *ikePacketFactory) MakeInit(info *IKEPacketInitInfo) (IIKEPacket, e
 		packet.GetPayloadFactory().CreateTransportSupport()
 	}
 
+	thisPT.setGeneralInfo(packet, &info.General)
 	return packet, nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPT *ikePacketFactory) MakeInformationNotify(code uint16) (IIKEPacket, error) {
-	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_INFORMATIONAL)
+func (thisPT *ikePacketFactory) MakeInformationNotify(code uint16, gInfo *IKEPacketGeneralInfo) (IIKEPacket, error) {
+	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_INFORMATIONAL, gInfo.ESN, gInfo.ESNSize)
 	packet.GetPayloadFactory().CreateNotify(0, code, nil)
+	thisPT.setGeneralInfo(packet, gInfo)
 	return packet, nil
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPT *ikePacketFactory) MakeChildSA(info *IKEPacketChildSAInfo) (IIKEPacket, error) {
-	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_CREATE_CHILD_SA)
+	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_CREATE_CHILD_SA, info.General.ESN, info.General.ESNSize)
 	packet.GetPayloadFactory().CreatePhase2Proposal(info.Phase2Proposal)
 	packet.GetPayloadFactory().CreateNonce(info.Nonce)
 	packet.GetPayloadFactory().CreateTrafficSelector(&info.TSI)
 	packet.GetPayloadFactory().CreateTrafficSelector(&info.TSR)
+	thisPT.setGeneralInfo(packet, &info.General)
 	return packet, nil
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPT *ikePacketFactory) MakeAuth(info *IKEPacketAuthInfo) (IIKEPacket, error) {
-	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_IKE_AUTH)
+	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_IKE_AUTH, info.General.ESN, info.General.ESNSize)
 
 	if info.Initiator {
 		packet.GetPayloadFactory().CreateInitiatorID(&info.ID)
@@ -78,13 +94,15 @@ func (thisPT *ikePacketFactory) MakeAuth(info *IKEPacketAuthInfo) (IIKEPacket, e
 		packet.GetPayloadFactory().CreateTransportSupport()
 	}
 	packet.GetPayloadFactory().CreateNotify(0, 0, nil)
+	thisPT.setGeneralInfo(packet, &info.General)
 	return packet, nil
 }
 
 //---------------------------------------------------------------------------------------
 func (thisPT *ikePacketFactory) MakeDeletePacket(info *IKEPacketDeleteInfo) (IIKEPacket, error) {
-	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_INFORMATIONAL)
+	packet, _ := createIKEPacket(nil, IKEProtocolExChangeType_INFORMATIONAL, info.General.ESN, info.General.ESNSize)
 	packet.GetPayloadFactory().CreateDelete(&info.DelInfo)
+	thisPT.setGeneralInfo(packet, &info.General)
 	return packet, nil
 }
 

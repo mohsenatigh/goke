@@ -3,13 +3,11 @@ package gcrypto
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	crand "crypto/rand"
 	"errors"
 )
 
 type cryptoCipher struct {
 	cipherType GCryptCipherAlg
-	iv         [32]byte
 	key        []byte
 }
 
@@ -30,10 +28,6 @@ func (thisPt *cryptoCipher) Encrypt(in []byte, out []byte, iv []byte) error {
 	}
 	blockMode := cipher.NewCBCEncrypter(c, iv)
 	blockMode.CryptBlocks(out, in)
-
-	//update iv
-	blockSize := thisPt.cipherType.BlockSize()
-	copy(thisPt.iv[:blockSize], out[:blockSize])
 	return nil
 }
 
@@ -60,12 +54,6 @@ func (thisPt *cryptoCipher) GetPadLen(bufferSize int) int {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoCipher) GetIV() []byte {
-	blockSize := thisPt.cipherType.BlockSize()
-	return thisPt.iv[:blockSize]
-}
-
-//---------------------------------------------------------------------------------------
 func (thisPt *cryptoCipher) SetKey(key []byte) {
 	thisPt.key = make([]byte, len(key))
 	copy(thisPt.key, key)
@@ -86,9 +74,13 @@ func createCryptoCipher(cType GCryptCipherAlg, key []byte) IGCryptoCipher {
 	h := &cryptoCipher{
 		cipherType: cType,
 	}
+
 	if key != nil {
 		h.SetKey(key)
 	}
-	crand.Read(h.iv[:])
+
+	if _, err := h.getCipher(key); err != nil {
+		return nil
+	}
 	return h
 }

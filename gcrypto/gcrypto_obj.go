@@ -31,7 +31,7 @@ func (thisPt *cryptoObj) GetCipher(sType GCryptCipherAlg, key []byte) IGCryptoCi
 
 //---------------------------------------------------------------------------------------
 func (thisPt *cryptoObj) GetDH(group GCryptoDH) IGCryptoDH {
-	return createCryptoDH(group)
+	return createCryptoDH(group, nil)
 }
 
 //---------------------------------------------------------------------------------------

@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	crand "crypto/rand"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
@@ -15,24 +15,25 @@ import (
 //---------------------------------------------------------------------------------------
 type cryptoDH struct {
 	group      GCryptoDH
-	privateKey *ecdsa.PrivateKey
+	privateKey []byte
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoDH) generatePrivateKey() error {
-	c, _ := thisPt.getCurve()
+func (thisPt *cryptoDH) generatePrivateKey(key []byte) error {
+	//get curve
+	c, keyLen := thisPt.getCurve()
+	if c == nil {
+		return fmt.Errorf("invalid DH group %d ", thisPt.group)
+	}
+
 	if thisPt.privateKey == nil {
-		//get curve
-		if c == nil {
-			return fmt.Errorf("invalid DH group %d ", thisPt.group)
+		thisPt.privateKey = make([]byte, keyLen)
+		if key == nil {
+			rand.Read(thisPt.privateKey)
+		} else {
+			copy(thisPt.privateKey, key)
 		}
 
-		//serialize public key and keep private key
-		key, err := ecdsa.GenerateKey(c, crand.Reader)
-		if err != nil {
-			return err
-		}
-		thisPt.privateKey = key
 	}
 	return nil
 }
@@ -63,7 +64,7 @@ func (thisPt *cryptoDH) ComputeKey(peerPublicKey []byte) ([]byte, error) {
 	pubKey := ecdsa.PublicKey{}
 	curve, keyLen := thisPt.getCurve()
 	if curve == nil {
-		return nil, errors.New("invalid peer public key")
+		return nil, errors.New("invalid DH group")
 	}
 
 	//read
@@ -85,28 +86,22 @@ func (thisPt *cryptoDH) ComputeKey(peerPublicKey []byte) ([]byte, error) {
 	pubKey.Y = new(big.Int).SetBytes(y)
 
 	//recheck private key
-	if err := thisPt.generatePrivateKey(); err != nil {
-		return nil, err
-	}
-
-	key, _ := pubKey.Curve.ScalarMult(pubKey.X, pubKey.Y, thisPt.privateKey.D.Bytes())
+	key, _ := pubKey.Curve.ScalarMult(pubKey.X, pubKey.Y, thisPt.privateKey)
 	return key.Bytes(), nil
 }
 
 //---------------------------------------------------------------------------------------
 //
 func (thisPt *cryptoDH) GetPublicKey() ([]byte, error) {
-
-	//
-	if err := thisPt.generatePrivateKey(); err != nil {
-		return nil, err
+	c, _ := thisPt.getCurve()
+	if c == nil {
+		return nil, errors.New("invalid DH group")
 	}
-
 	//
 	outBuf := bytes.NewBuffer(nil)
-	outBuf.Write(thisPt.privateKey.PublicKey.X.Bytes())
-	outBuf.Write(thisPt.privateKey.PublicKey.Y.Bytes())
-
+	x, y := c.ScalarBaseMult(thisPt.privateKey)
+	outBuf.Write(x.Bytes())
+	outBuf.Write(y.Bytes())
 	return outBuf.Bytes(), nil
 }
 
@@ -116,7 +111,8 @@ func (thisPt *cryptoDH) GetGroup() int {
 }
 
 //---------------------------------------------------------------------------------------
-func createCryptoDH(hType GCryptoDH) IGCryptoDH {
+func createCryptoDH(hType GCryptoDH, key []byte) IGCryptoDH {
 	h := &cryptoDH{group: hType}
+	h.generatePrivateKey(key)
 	return h
 }

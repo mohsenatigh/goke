@@ -27,7 +27,7 @@ func (thisPt *ikePayloadFactory) createIdPayload(pType int, info *IKEPayloadIDIn
 func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposalInfo, id uint8) (IIKEPayload, error) {
 
 	//function for creating transform payload
-	createTransformPayload := func(tType uint8, id uint16, keyLen uint16) IIKEPayload {
+	createTransformPayload := func(tType uint8, id uint16, keyLen uint16) []byte {
 
 		payload := thisPt.packet.CreateFreePayload(IKEProtocolPayloadType_T)
 
@@ -35,7 +35,8 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 		transformHeader := IKEProtocolProposalTransformHeader{
 			TransformID:   id,
 			TransformType: tType,
-			Reserved:      0}
+			Reserved:      0,
+		}
 		binary.Write(payload, binary.BigEndian, &transformHeader)
 
 		//for enc-key  add key attributes
@@ -48,12 +49,15 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 		}
 
 		//create payload
-		return payload
+		buffer := bytes.NewBuffer(nil)
+		payload.Serialize(buffer)
+		return buffer.Bytes()
 	}
 
 	//
-	createProposal := func(index uint8, proposal *IKEPayloadProposalInfo) IIKEPayload {
+	createProposal := func(index uint8, proposal *IKEPayloadProposalInfo) []byte {
 
+		//
 		payload := thisPt.packet.CreateFreePayload(IKEProtocolPayloadType_P)
 
 		//create and write main header
@@ -69,41 +73,43 @@ func (thisPt *ikePayloadFactory) createProposalPayload(list []IKEPayloadProposal
 		payload.Write(createTransformPayload(
 			IKEProtocolTransformType_ENCR,
 			uint16(proposal.EncryptionAlg),
-			uint16(proposal.EncryptionAlgKeyLen)).GetBodyBuffer())
+			uint16(proposal.EncryptionAlgKeyLen*8)))
 
 		//
 		payload.Write(createTransformPayload(
 			IKEProtocolTransformType_INTEG,
 			uint16(proposal.IntegrityAlg),
-			0).GetBodyBuffer())
+			0))
 
 		if id == IKEProtocolProposalHeaderID_IKE {
 			//
 			payload.Write(createTransformPayload(
 				IKEProtocolTransformType_PRF,
 				uint16(proposal.Prf),
-				0).GetBodyBuffer())
+				0))
 
 			//
 			payload.Write(createTransformPayload(
 				IKEProtocolTransformType_DH,
 				uint16(proposal.DH),
-				0).GetBodyBuffer())
+				0))
 		} else {
 			payload.Write(createTransformPayload(
 				IKEProtocolTransformType_ESN,
 				uint16(proposal.ESN),
-				0).GetBodyBuffer())
+				0))
 		}
 
 		//
-		return payload
+		buffer := bytes.NewBuffer(nil)
+		payload.Serialize(buffer)
+		return buffer.Bytes()
 	}
 
+	//
 	payload := thisPt.packet.CreatePayload(IKEProtocolPayloadType_SA)
 	for i, p := range list {
-		proposal := createProposal(uint8(i+1), &p)
-		payload.Write(proposal.GetBodyBuffer())
+		payload.Write(createProposal(uint8(i+1), &p))
 	}
 	return payload, nil
 }
@@ -244,10 +250,10 @@ func (thisPt *ikePayloadFactory) CreateTransportSupport() (IIKEPayload, error) {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *ikePayloadFactory) CreateNAT(info *IKEPayloadNatInfo) (IIKEPayload, error) {
+func (thisPt *ikePayloadFactory) CreateNAT(info *IKEPayloadNatInfo, src bool) (IIKEPayload, error) {
 
 	code := IKEProtocolNotifyCodes_NAT_DETECTION_SOURCE_IP
-	if !info.Src {
+	if !src {
 		code = IKEProtocolNotifyCodes_NAT_DETECTION_DESTINATION_IP
 	}
 

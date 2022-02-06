@@ -53,6 +53,21 @@ func TestIKESessionManagerFunctionality(t *testing.T) {
 		t.FailNow()
 	}
 
+	//
+	if sm.ReIndexSession(session, iSPI[:], nullSpi[:]) == nil {
+		t.FailNow()
+	}
+
+	//check for re-indexing
+	if sm.ReIndexSession(session, iSPI[:], rSPI[:]) != nil {
+		t.FailNow()
+	}
+
+	session = sm.Find(iSPI[:], rSPI[:])
+	if session == nil {
+		t.FailNow()
+	}
+
 	//check for half open sessions remove
 	checkSessionRemove(halfOpenSessionsLifeTime)
 

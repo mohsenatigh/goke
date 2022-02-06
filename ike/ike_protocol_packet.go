@@ -16,6 +16,8 @@ type ikeProtocolPacket struct {
 	payloads         []IIKEPayload
 	payloadFactory   IIKEPacketPayloadFactory
 	payloadDissector IIKEPacketPayloadDissector
+	esn              uint64
+	esnSize          int
 }
 
 //---------------------------------------------------------------------------------------
@@ -54,21 +56,42 @@ func (thisPt *ikeProtocolPacket) serializeBody(w io.Writer) error {
 func (thisPt *ikeProtocolPacket) loadPayload(r io.Reader) error {
 	pType := thisPt.header.NPayload
 	for pType != 0 {
-		payload, err := IKEProtocolReadPayload(int(pType), r)
+		payload, err := readProtocolPayload(int(pType), r)
 		if err != nil {
 			return err
 		}
 		pType = payload.GetHeader().NextPayload
 		thisPt.payloads = append(thisPt.payloads, payload)
+
+		//check for encrypted payload. must be the last one
+		if payload.GetType() == IKEProtocolPayloadType_E {
+			break
+		}
 	}
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *ikeProtocolPacket) Load(r io.Reader) error {
+func (thisPt *ikeProtocolPacket) Load(r io.Reader, esnSize int) error {
 
 	//clear current payloads
 	thisPt.payloads = []IIKEPayload{}
+
+	//check for SPI
+	thisPt.esnSize = esnSize
+	if esnSize == 4 {
+		var esn uint32
+		if err := binary.Read(r, binary.BigEndian, &esn); err != nil {
+			return err
+		}
+		thisPt.esn = uint64(esn)
+	} else if esnSize == 8 {
+		var esn uint64
+		if err := binary.Read(r, binary.BigEndian, &esn); err != nil {
+			return err
+		}
+		thisPt.esn = esn
+	}
 
 	//read header
 	if err := binary.Read(r, binary.BigEndian, &thisPt.header); err != nil {
@@ -178,9 +201,13 @@ func (thisPt *ikeProtocolPacket) checkHMAC(payload IIKEPayload, auth gcrypto.IGC
 	hmac := payloadData[len(payloadData)-auth.GetLen():]
 	body := payloadData[0 : len(payloadData)-auth.GetLen()]
 
-	//serialize herader
+	//serialize header
 	hBuffer := bytes.NewBuffer(nil)
 	if err := binary.Write(hBuffer, binary.BigEndian, &thisPt.header); err != nil {
+		return false
+	}
+
+	if err := binary.Write(hBuffer, binary.BigEndian, payload.GetHeader()); err != nil {
 		return false
 	}
 
@@ -222,7 +249,7 @@ func (thisPt *ikeProtocolPacket) Decrypt(encrypt gcrypto.IGCryptoCipher, auth gc
 
 	//read IV
 	iv := payloadData[0:encrypt.GetAlg().BlockSize()]
-	body := payloadData[encrypt.GetAlg().BlockSize() : len(payloadData)-encControlLen]
+	body := payloadData[encrypt.GetAlg().BlockSize() : len(payloadData)-auth.GetLen()]
 	if len(body) == 0 {
 		return nil, errors.New("invalid encrypted payload")
 	}
@@ -237,6 +264,8 @@ func (thisPt *ikeProtocolPacket) Decrypt(encrypt gcrypto.IGCryptoCipher, auth gc
 	packet := &ikeProtocolPacket{}
 	packet.header = thisPt.header
 	packet.header.NPayload = payload.GetHeader().NextPayload
+	packet.payloadDissector = createPayloadDissector(packet)
+	packet.payloadFactory = createPayloadFactory(packet)
 
 	reader := bytes.NewReader(dBuffer)
 	if err := packet.loadPayload(reader); err != nil {
@@ -246,13 +275,13 @@ func (thisPt *ikeProtocolPacket) Decrypt(encrypt gcrypto.IGCryptoCipher, auth gc
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *ikeProtocolPacket) Encrypt(w io.Writer, encrypt gcrypto.IGCryptoCipher, auth gcrypto.IGCryptoHMAC) error {
+func (thisPt *ikeProtocolPacket) Encrypt(w io.Writer, crypt gcrypto.IGCrypto, encrypt gcrypto.IGCryptoCipher, auth gcrypto.IGCryptoHMAC) error {
 
 	//To many memory copies is for creating a clean code, anyway, the main performance bottleneck is encryption, not memory copy
 	//HEADER | ENC-PAYLOAD-HEADER | IV{N} | BODY{N} | PAD {N} | PADLEN{1} |
 
 	//get IV
-	iv := encrypt.GetIV()
+	iv := crypt.GenerateRandom(encrypt.GetAlg().BlockSize())
 
 	//
 	if len(thisPt.payloads) == 0 {
@@ -338,20 +367,32 @@ func (thisPt *ikeProtocolPacket) GetPayloadFactory() IIKEPacketPayloadFactory {
 }
 
 //---------------------------------------------------------------------------------------
+func (thisPt *ikeProtocolPacket) GetESN() uint64 {
+	return thisPt.esn
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeProtocolPacket) GetESNSize() int {
+	return thisPt.esnSize
+}
+
+//---------------------------------------------------------------------------------------
 func (thisPt *ikeProtocolPacket) SetSequence(flag uint8, seq uint32) {
 	thisPt.header.Id = seq
 	thisPt.header.Flags = flag
 }
 
 //---------------------------------------------------------------------------------------
-func createIKEPacket(r io.Reader, pType uint8) (IIKEPacket, error) {
+func createIKEPacket(r io.Reader, pType uint8, esn uint64, esnSize int) (IIKEPacket, error) {
 	packet := &ikeProtocolPacket{}
 	if r != nil {
-		if err := packet.Load(r); err != nil {
+		if err := packet.Load(r, esnSize); err != nil {
 			return nil, err
 		}
 	} else {
 		packet.header.ExType = pType
+		packet.esn = esn
+		packet.esnSize = esnSize
 	}
 
 	packet.payloadDissector = createPayloadDissector(packet)

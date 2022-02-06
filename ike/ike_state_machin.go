@@ -3,8 +3,10 @@ package ike
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 
 	"github.com/mohsenatigh/goke/gcrypto"
@@ -17,6 +19,19 @@ type ikeStateMachine struct {
 	actor          IIKEActor
 	sessionManager IIKESessionManager
 	ikeProfile     IKEProfile
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) getESNSize(session IIKESession) int {
+
+	if session != nil && !session.HaveFlag(IKE_SESSION_FLAG_ENABLE_NAT) {
+		return 0
+	}
+
+	if thisPt.ikeProfile.ExtendedESN {
+		return 8
+	}
+	return 4
 }
 
 //---------------------------------------------------------------------------------------
@@ -181,14 +196,14 @@ func (thisPt *ikeStateMachine) calculatePhase1KeyMaterial(session IIKESession, p
 	}
 
 	//set PRF key
-	hmacObj := thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, key)
-
-	//{SK_d | SK_ai | SK_ar | SK_ei | SK_er | SK_pi | SK_pr } = prf+ (SKEYSEED, Ni | Nr | SPIi | SPIr )
 	bodyBuffer := bytes.NewBuffer(nil)
 	bodyBuffer.Write(session.GetInitiatorNonce())
 	bodyBuffer.Write(session.GetResponderNonce())
-	seed, _ := hmacObj.GetHMAC(bodyBuffer.Bytes())
 
+	hmacObj := thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, bodyBuffer.Bytes())
+	seed, _ := hmacObj.GetHMAC(key)
+
+	//{SK_d | SK_ai | SK_ar | SK_ei | SK_er | SK_pi | SK_pr } = prf+ (SKEYSEED, Ni | Nr | SPIi | SPIr )
 	bodyBuffer.Write(session.GetInitiatorSPI())
 	bodyBuffer.Write(session.GetResponderSPI())
 
@@ -199,12 +214,26 @@ func (thisPt *ikeStateMachine) calculatePhase1KeyMaterial(session IIKESession, p
 	//read keys
 	prfReader := bytes.NewReader(prfBuf)
 	session.GetPhase1KeyInfo().SKD = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
-	session.GetPhase1KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.Size())
-	session.GetPhase1KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.Size())
-	session.GetPhase1KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen/8)
-	session.GetPhase1KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen/8)
+	session.GetPhase1KeyInfo().IKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.KeySize())
+	session.GetPhase1KeyInfo().RKey.SKA = readKey(prfReader, session.GetPhase1KeyInfo().Int.KeySize())
+	session.GetPhase1KeyInfo().IKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen)
+	session.GetPhase1KeyInfo().RKey.SKE = readKey(prfReader, session.GetPhase1KeyInfo().KeyLen)
 	session.GetPhase1KeyInfo().IKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
 	session.GetPhase1KeyInfo().RKey.SKP = readKey(prfReader, session.GetPhase1KeyInfo().Prf.Size())
+
+	log.Printf("PrivateKey : %v\n", hex.EncodeToString(key))
+	log.Printf("SEED : %v\n", hex.EncodeToString(seed))
+	log.Printf("INONCE : %v\n", hex.EncodeToString(session.GetInitiatorNonce()))
+	log.Printf("RNONCE : %v\n", hex.EncodeToString(session.GetResponderNonce()))
+	log.Printf("ISPI : %v\n", hex.EncodeToString(session.GetInitiatorSPI()))
+	log.Printf("RSPI : %v\n", hex.EncodeToString(session.GetResponderSPI()))
+	log.Printf("SKD : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().SKD))
+	log.Printf("IKEY.SKA : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().IKey.SKA))
+	log.Printf("IKEY.SKE : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().IKey.SKE))
+	log.Printf("IKEY.SKP : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().IKey.SKP))
+	log.Printf("RKEY.SKA : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().RKey.SKA))
+	log.Printf("RKEY.SKE : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().RKey.SKE))
+	log.Printf("RKEY.SKP : %v\n", hex.EncodeToString(session.GetPhase1KeyInfo().RKey.SKP))
 
 	return nil
 }
@@ -343,20 +372,41 @@ func (thisPt *ikeStateMachine) makeAuth(context IIKEProcessContext, phase2Propos
 	}
 
 	//
-	info := IKEPacketAuthInfo{}
-	info.Initiator = session.IsInitiator()
-	info.Ca = context.GetProfile().CA
-	info.Cert = context.GetProfile().Certificate
-	info.ID = id
-	info.NeedCert = session.HaveFlag(IKE_SESSION_FLAG_NEED_CERT)
-	info.Transport = session.HaveFlag(IKE_SESSION_FLAG_TRANSPORT)
+	info := IKEPacketAuthInfo{
+		ID:        id,
+		Initiator: session.IsInitiator(),
+		Ca:        context.GetProfile().CA,
+		Cert:      context.GetProfile().Certificate,
+		NeedCert:  session.HaveFlag(IKE_SESSION_FLAG_NEED_CERT),
+		Transport: session.HaveFlag(IKE_SESSION_FLAG_TRANSPORT),
+		TSI:       context.GetProfile().LocalTS,
+		TSR:       context.GetProfile().RemoteTS,
+
+		General: IKEPacketGeneralInfo{
+			ISPI:      session.GetInitiatorSPI(),
+			RSPI:      session.GetResponderSPI(),
+			Initiator: session.IsInitiator(),
+			ESN:       0,
+			ESNSize:   thisPt.getESNSize(session),
+		},
+
+		Auth: IKEPayloadAuthInfo{
+			ID:          thisPt.serializeID(&id),
+			Initiator:   session.IsInitiator(),
+			Nonce:       session.GetMyNonce(),
+			PRF:         thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, session.GetPhase1KeyInfo().SKD),
+			PSK:         []byte(context.GetProfile().PSK),
+			PrivateKey:  context.GetProfile().PrivateKey,
+			PublicKey:   context.GetProfile().Certificate,
+			PrevMessage: session.GetPrevPacket(),
+		},
+	}
+
 	if !context.GetProfile().UsePSK && context.GetProfile().PeerCertificate == nil {
 		info.NeedCertRequest = true
 	}
 
 	//fill traffic selectors
-	info.TSI = context.GetProfile().LocalTS
-	info.TSR = context.GetProfile().RemoteTS
 	if !info.Initiator {
 		info.TSI, info.TSR = info.TSR, info.TSI
 	}
@@ -367,14 +417,6 @@ func (thisPt *ikeStateMachine) makeAuth(context IIKEProcessContext, phase2Propos
 	} else {
 		info.Auth.AuthType = IKEProtocolAuthType_RSA
 	}
-	info.Auth.ID = thisPt.serializeID(&id)
-	info.Auth.Initiator = info.Initiator
-	info.Auth.Nonce = session.GetMyNonce()
-	info.Auth.PRF = thisPt.crypto.GetHMAC(session.GetPhase1KeyInfo().Prf, session.GetPhase1KeyInfo().SKD)
-	info.Auth.PSK = []byte(context.GetProfile().PSK)
-	info.Auth.PrivateKey = context.GetProfile().PrivateKey
-	info.Auth.PublicKey = context.GetProfile().Certificate
-	info.Auth.PrevMessage = session.GetPrevPacket()
 
 	//fill phase2 info
 	if phase2Proposal != nil {
@@ -455,7 +497,6 @@ func (thisPt *ikeStateMachine) makeInitResponse(context IIKEProcessContext, prop
 			SPR:  session.GetResponderSPI(),
 			IPI:  ipI,
 			IPR:  ipR,
-			Src:  true,
 			Hash: thisPt.crypto.GetHash(gcrypto.IANA_HASH_SHA1),
 		},
 
@@ -464,12 +505,28 @@ func (thisPt *ikeStateMachine) makeInitResponse(context IIKEProcessContext, prop
 			SPR:  session.GetResponderSPI(),
 			IPI:  ipI,
 			IPR:  ipR,
-			Src:  false,
 			Hash: thisPt.crypto.GetHash(gcrypto.IANA_HASH_SHA1),
+		},
+
+		General: IKEPacketGeneralInfo{
+			ISPI:      session.GetInitiatorSPI(),
+			RSPI:      session.GetResponderSPI(),
+			Initiator: session.IsInitiator(),
 		},
 	}
 
 	return thisPt.packetFactory.MakeInit(&info)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *ikeStateMachine) makeNotifyPacket(code uint16, session IIKESession) IIKEPacket {
+	gInfo := IKEPacketGeneralInfo{
+		ISPI:      session.GetInitiatorSPI(),
+		RSPI:      session.GetResponderSPI(),
+		Initiator: session.IsInitiator(),
+	}
+	packet, _ := thisPt.packetFactory.MakeInformationNotify(code, &gInfo)
+	return packet
 }
 
 //---------------------------------------------------------------------------------------
@@ -480,7 +537,7 @@ func (thisPt *ikeStateMachine) processInitPacket(packet IIKEPacket, context IIKE
 
 	returnErr := func(code uint16, err error) (IIKEPacket, error) {
 		thisPt.terminateSession(session)
-		packet, _ := thisPt.packetFactory.MakeInformationNotify(code)
+		packet := thisPt.makeNotifyPacket(code, session)
 		return packet, err
 	}
 
@@ -587,7 +644,7 @@ func (thisPt *ikeStateMachine) processAuthPacket(packet IIKEPacket, context IIKE
 
 	returnErr := func(code uint16, err error) (IIKEPacket, error) {
 		thisPt.terminateSession(session)
-		packet, _ := thisPt.packetFactory.MakeInformationNotify(code)
+		packet := thisPt.makeNotifyPacket(code, session)
 		return packet, err
 	}
 
@@ -659,7 +716,7 @@ func (thisPt *ikeStateMachine) processChildSA(packet IIKEPacket, context IIKEPro
 
 	//return
 	returnErr := func(code uint16, err error) (IIKEPacket, error) {
-		packet, _ := thisPt.packetFactory.MakeInformationNotify(code)
+		packet := thisPt.makeNotifyPacket(code, session)
 		return packet, err
 	}
 
@@ -802,7 +859,7 @@ func (thisPt *ikeStateMachine) serializePacket(packet IIKEPacket, session IIKESe
 	auth := thisPt.crypto.GetAuth(session.GetPhase1KeyInfo().Int, session.GetRemotePhase1Key().SKA)
 
 	//encrypt
-	if err := packet.Encrypt(buffer, enc, auth); err != nil {
+	if err := packet.Encrypt(buffer, thisPt.crypto, enc, auth); err != nil {
 		return nil, err
 	}
 	return buffer.Bytes(), nil
@@ -821,9 +878,19 @@ func (thisPt *ikeStateMachine) updateSeq(packet IIKEPacket, session IIKESession)
 func (thisPt *ikeStateMachine) Process(in []byte, nat bool, local, remote *net.UDPAddr) ([]byte, error) {
 
 	//create packet
-	packet, err := createIKEPacket(bytes.NewBuffer(in), 0)
+	esnSize := 0
+	if nat {
+		esnSize = thisPt.getESNSize(nil)
+	}
+	packet, err := createIKEPacket(bytes.NewBuffer(in), 0, 0, esnSize)
 	if err != nil {
 		return nil, err
+	}
+
+	//check for ESP packets
+	if packet.GetESN() != 0 {
+		//TODO ESP packets
+		return nil, nil
 	}
 
 	//find session
@@ -863,8 +930,8 @@ func (thisPt *ikeStateMachine) Process(in []byte, nat bool, local, remote *net.U
 	outP, err := thisPt.processPacket(packet, context)
 
 	if outP != nil {
-		thisPt.updateSeq(packet, session)
-		out, err = thisPt.serializePacket(packet, session)
+		thisPt.updateSeq(outP, session)
+		out, err = thisPt.serializePacket(outP, session)
 	}
 	return out, err
 }

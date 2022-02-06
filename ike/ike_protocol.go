@@ -1,7 +1,8 @@
 package ike
 
 const (
-	IKE_PROTOCOL_NONCE_LEN = 32
+	IKE_PROTOCOL_NONCE_LEN    = 64
+	IKE_PROTOCOL_ESP_SPI_SIZE = 4 //extended SPI not supported
 )
 
 //---------------------------------------------------------------------------------------
@@ -117,6 +118,19 @@ const (
 	IKEProtocolIDType_ID_DER_ASN1_DN = 9
 	IKEProtocolIDType_ID_DER_ASN1_GN = 10
 	IKEProtocolIDType_ID_KEY_ID      = 11
+)
+
+//---------------------------------------------------------------------------------------
+const (
+	IKEProtocolProposalHeaderID_IKE = 1
+	IKEProtocolProposalHeaderID_AH  = 2
+	IKEProtocolProposalHeaderID_ESP = 3
+)
+
+//---------------------------------------------------------------------------------------
+const (
+	IKEProtocolTrafficSelectorIPVersion_V4 = 7
+	IKEProtocolTrafficSelectorIPVersion_V6 = 8
 )
 
 //---------------------------------------------------------------------------------------

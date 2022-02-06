@@ -13,19 +13,6 @@ const (
 )
 
 //---------------------------------------------------------------------------------------
-const (
-	IKEProtocolProposalHeaderID_IKE = 1
-	IKEProtocolProposalHeaderID_AH  = 2
-	IKEProtocolProposalHeaderID_ESP = 3
-)
-
-//---------------------------------------------------------------------------------------
-const (
-	IKEProtocolTrafficSelectorIPVersion_V4 = 7
-	IKEProtocolTrafficSelectorIPVersion_V6 = 8
-)
-
-//---------------------------------------------------------------------------------------
 type IKEPayloadProposalInfo struct {
 	EncryptionAlg       gcrypto.GCryptCipherAlg
 	EncryptionAlgKeyLen int
@@ -57,7 +44,6 @@ type IKEPayloadNatInfo struct {
 	SPR  []byte
 	IPI  net.IP
 	IPR  net.IP
-	Src  bool
 	Hash gcrypto.IGCryptoHash
 }
 
@@ -125,7 +111,7 @@ type IIKEPacketPayloadFactory interface {
 	CreateDH(dh gcrypto.IGCryptoDH) (IIKEPayload, error)
 	CreateFragmentSupport() (IIKEPayload, error)
 	CreateTransportSupport() (IIKEPayload, error)
-	CreateNAT(info *IKEPayloadNatInfo) (IIKEPayload, error)
+	CreateNAT(info *IKEPayloadNatInfo, src bool) (IIKEPayload, error)
 	CreatePhase2Proposal(list []IKEPayloadProposalInfo) (IIKEPayload, error)
 	CreateTrafficSelector(info *IKEPayloadTrafficSelectorInfo) (IIKEPayload, error)
 	CreateAuth(info *IKEPayloadAuthInfo) (IIKEPayload, error)
@@ -161,14 +147,25 @@ type IIKEPacket interface {
 	CreatePayload(code int) IIKEPayload
 	CreateFreePayload(code int) IIKEPayload
 	Serialize(w io.Writer) error
-	Encrypt(w io.Writer, encrypt gcrypto.IGCryptoCipher, auth gcrypto.IGCryptoHMAC) error
+	Encrypt(w io.Writer, crypto gcrypto.IGCrypto, encrypt gcrypto.IGCryptoCipher, auth gcrypto.IGCryptoHMAC) error
 	Decrypt(encrypt gcrypto.IGCryptoCipher, auth gcrypto.IGCryptoHMAC) (IIKEPacket, error)
-	Load(r io.Reader) error
+	Load(r io.Reader, espSpiSize int) error
 	Dump() string
 	GetPayloadDissector() IIKEPacketPayloadDissector
 	GetPayloadFactory() IIKEPacketPayloadFactory
 	HasError() (bool, int)
 	SetSequence(flag uint8, seq uint32)
+	GetESN() uint64
+	GetESNSize() int
+}
+
+//---------------------------------------------------------------------------------------
+type IKEPacketGeneralInfo struct {
+	ISPI      []byte
+	RSPI      []byte
+	Initiator bool
+	ESNSize   int
+	ESN       uint64
 }
 
 //---------------------------------------------------------------------------------------
@@ -185,6 +182,7 @@ type IKEPacketInitInfo struct {
 	Cert            gcrypto.IGCryptoRSA
 	Ca              gcrypto.IGCryptoRSA
 	Transport       bool
+	General         IKEPacketGeneralInfo
 }
 
 //---------------------------------------------------------------------------------------
@@ -193,6 +191,7 @@ type IKEPacketChildSAInfo struct {
 	Phase2Proposal []IKEPayloadProposalInfo
 	TSI            IKEPayloadTrafficSelectorInfo
 	TSR            IKEPayloadTrafficSelectorInfo
+	General        IKEPacketGeneralInfo
 }
 
 //---------------------------------------------------------------------------------------
@@ -211,17 +210,19 @@ type IKEPacketAuthInfo struct {
 	NeedCFG         bool
 	ConfigurationV4 IKEPayloadConfigurationInfo
 	ConfigurationV6 IKEPayloadConfigurationInfo
+	General         IKEPacketGeneralInfo
 }
 
 //---------------------------------------------------------------------------------------
 type IKEPacketDeleteInfo struct {
 	DelInfo IKEPayloadDeleteInfo
+	General IKEPacketGeneralInfo
 }
 
 //---------------------------------------------------------------------------------------
 type IIKEPacketFactory interface {
 	MakeInit(info *IKEPacketInitInfo) (IIKEPacket, error)
-	MakeInformationNotify(code uint16) (IIKEPacket, error)
+	MakeInformationNotify(code uint16, gInfo *IKEPacketGeneralInfo) (IIKEPacket, error)
 	MakeChildSA(info *IKEPacketChildSAInfo) (IIKEPacket, error)
 	MakeAuth(info *IKEPacketAuthInfo) (IIKEPacket, error)
 	MakeDeletePacket(info *IKEPacketDeleteInfo) (IIKEPacket, error)
@@ -339,6 +340,7 @@ type IKEProfile struct {
 	Phase1Proposal           *IKEPayloadProposalInfo
 	Phase2Proposal           *IKEPayloadProposalInfo
 	Cookie                   interface{}
+	ExtendedESN              bool
 }
 
 //---------------------------------------------------------------------------------------
@@ -362,6 +364,7 @@ type IIKESessionManager interface {
 	New(initiator bool, spi []byte, spr []byte) (IIKESession, error)
 	Timer(cTime int64) int
 	GetSessionsCount() int
+	ReIndexSession(session IIKESession, ispi []byte, rspi []byte) error
 }
 
 //---------------------------------------------------------------------------------------

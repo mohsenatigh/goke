@@ -61,7 +61,7 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 		transformHeader := IKEProtocolProposalTransformHeader{}
 
 		//read transform payload
-		tPayload, err := IKEProtocolReadPayload(payload.GetType(), payload)
+		tPayload, err := readProtocolPayload(payload.GetType(), payload)
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (thisPt *ikePacketPayloadDissector) dissectProposalPayload(payload IIKEPayl
 		proposalHeader := IKEProtocolProposalHeader{}
 
 		//read saPayload
-		saPayload, err := IKEProtocolReadPayload(payload.GetType(), payload)
+		saPayload, err := readProtocolPayload(payload.GetType(), payload)
 		if err != nil {
 			break
 		}

@@ -96,6 +96,24 @@ func (thisPt *ikeSessionManager) Find(spi []byte, spr []byte) IIKESession {
 }
 
 //---------------------------------------------------------------------------------------
+func (thisPt *ikeSessionManager) ReIndexSession(session IIKESession, ispi []byte, rspi []byte) error {
+	sessionObj := session.(*ikeSession)
+	key := thisPt.getSessionKey(ispi, rspi)
+
+	thisPt.accessLock.Lock()
+	defer thisPt.accessLock.Unlock()
+
+	if _, fnd := thisPt.sessions[key]; fnd {
+		return errors.New("duplicate spi")
+	}
+
+	delete(thisPt.sessions, session.GetId())
+	sessionObj.initParams.id = key
+	thisPt.sessions[key] = sessionObj
+	return nil
+}
+
+//---------------------------------------------------------------------------------------
 func (thisPt *ikeSessionManager) New(initiator bool, ispi []byte, rspi []byte) (IIKESession, error) {
 
 	//
