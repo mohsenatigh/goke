@@ -60,7 +60,6 @@ type IGCryptoRSA interface {
 	GetDER() []byte
 	Sign([]byte) ([]byte, error)
 	Verify(msg []byte, sig []byte) error
-	GetCertSubjectKeyID() []byte
 	GetCertSubjectInfoKeyID() []byte
 }
 

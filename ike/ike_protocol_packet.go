@@ -136,7 +136,7 @@ func (thisPt *ikeProtocolPacket) HasError() (bool, int) {
 				return true, -1
 			}
 
-			if header.NotifyMessageType < IKEProtocolNotifyCodes_INITIAL_CONTACT {
+			if header.NotifyMessageType < IKEProtocolNotifyCodes_INITIAL_CONTACT && header.NotifyMessageType != 0 {
 				return true, int(header.NotifyMessageType)
 			}
 		}

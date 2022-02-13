@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"io/ioutil"
 	"log"
+	"strings"
 )
 
 //---------------------------------------------------------------------------------------
@@ -22,43 +23,60 @@ func (thisPt *cryptoRSA) loadCertDer(data []byte) error {
 	der, err := x509.ParseCertificate(data)
 	if err != nil {
 		log.Println(err)
-		return nil
+		return err
 	}
 	thisPt.certificate = der
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoRSA) loadCert(fName string) error {
-	keyValue, err := ioutil.ReadFile(fName)
-	if err != nil {
-		log.Println(err)
-		return nil
-	}
+func (thisPt *cryptoRSA) loadCertData(keyValue []byte) error {
 	block, _ := pem.Decode(keyValue)
 	return thisPt.loadCertDer(block.Bytes)
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoRSA) loadPrivateKey(fName string) error {
+func (thisPt *cryptoRSA) loadCert(fName string) error {
+	if strings.Contains(fName, "-----BEGIN CERTIFICATE-----") {
+		return thisPt.loadCertData([]byte(fName))
+	}
+
 	keyValue, err := ioutil.ReadFile(fName)
 	if err != nil {
-		log.Println(err)
-		return nil
+		return err
 	}
+	return thisPt.loadCertData(keyValue)
+}
+
+//---------------------------------------------------------------------------------------
+func (thisPt *cryptoRSA) loadPrivateKeyData(keyValue []byte) error {
 	block, _ := pem.Decode(keyValue)
 	der, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
-		log.Println(err)
-		return nil
+		return err
 	}
 	thisPt.privateKey = der
 	return nil
 }
 
 //---------------------------------------------------------------------------------------
+func (thisPt *cryptoRSA) loadPrivateKey(fName string) error {
+	//first try to read from the file
+	if strings.Contains(fName, "-----BEGIN RSA PRIVATE KEY-----") {
+		return thisPt.loadPrivateKeyData([]byte(fName))
+	}
+
+	//load from file
+	keyValue, err := ioutil.ReadFile(fName)
+	if err != nil {
+		return err
+	}
+	return thisPt.loadPrivateKeyData(keyValue)
+}
+
+//---------------------------------------------------------------------------------------
 func (thisPt *cryptoRSA) GetDER() []byte {
-	return x509.MarshalPKCS1PublicKey(thisPt.certificate.PublicKey.(*rsa.PublicKey))
+	return thisPt.certificate.Raw
 }
 
 //---------------------------------------------------------------------------------------
@@ -79,13 +97,9 @@ func (thisPt *cryptoRSA) Verify(msg []byte, sig []byte) error {
 }
 
 //---------------------------------------------------------------------------------------
-func (thisPt *cryptoRSA) GetCertSubjectKeyID() []byte {
-	return thisPt.certificate.SubjectKeyId
-}
-
-//---------------------------------------------------------------------------------------
 func (thisPt *cryptoRSA) GetCertSubjectInfoKeyID() []byte {
-	return thisPt.certificate.RawSubjectPublicKeyInfo
+	res := sha1.Sum(thisPt.certificate.RawSubjectPublicKeyInfo)
+	return res[:]
 }
 
 //---------------------------------------------------------------------------------------

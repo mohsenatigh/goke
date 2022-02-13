@@ -19,6 +19,66 @@ func TestIKEProtocolPacketTestInvalidInput(t *testing.T) {
 }
 
 //---------------------------------------------------------------------------------------
+func TestProtocolPacketTestAuthProcess(t *testing.T) {
+	packet, err := createIKEPacket(nil, IKEProtocolExChangeType_IKE_AUTH, 0, 0)
+	if err != nil {
+		t.FailNow()
+	}
+
+	//
+	cr := gcrypto.CreateCryptoObject()
+
+	//create PRF object
+	prfKey := cr.GenerateRandom(20)
+	prf := cr.GetHMAC(gcrypto.IANA_PRF_HMAC_SHA1, prfKey)
+
+	//generate dummy message
+	prevMessage := cr.GenerateRandom(512)
+
+	//generate nonce
+	nonce := cr.GenerateRandom(64)
+
+	//generate ID
+	id := cr.GenerateRandom(24)
+
+	//psk
+	psk := "PSK"
+
+	//check PSK
+	info := IKEPayloadAuthInfo{
+		Initiator:   true,
+		PRF:         prf,
+		PrevMessage: prevMessage,
+		Nonce:       nonce,
+		ID:          id,
+		PSK:         []byte(psk),
+		AuthType:    IKEProtocolAuthType_PSK,
+	}
+
+	if _, err := packet.GetPayloadFactory().CreateAuth(&info); err != nil {
+		t.FailNow()
+	}
+
+	//
+	prf.SetKey(prfKey)
+	info = IKEPayloadAuthInfo{
+		Initiator:   true,
+		PRF:         prf,
+		PrevMessage: prevMessage,
+		Nonce:       nonce,
+		ID:          id,
+		PSK:         []byte(psk),
+		AuthType:    IKEProtocolAuthType_PSK,
+	}
+	if packet.GetPayloadDissector().ValidateAuth(&info) != nil {
+		t.FailNow()
+	}
+
+	//
+
+}
+
+//---------------------------------------------------------------------------------------
 func TestProtocolPacketTestEncryptionProcess(t *testing.T) {
 
 	//test packet creation
@@ -137,5 +197,4 @@ func TestIKEProtocolPacketTestInitProcess(t *testing.T) {
 	if _, err := packet.GetPayloadDissector().GetNAT(false); err != nil {
 		t.FailNow()
 	}
-
 }

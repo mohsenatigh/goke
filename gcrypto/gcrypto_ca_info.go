@@ -36,7 +36,7 @@ func (thisPt *cryptoCAInfo) ValidateDer(der []byte) bool {
 		return false
 	}
 
-	return false
+	return true
 }
 
 //---------------------------------------------------------------------------------------
